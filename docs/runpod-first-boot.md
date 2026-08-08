@@ -83,7 +83,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 source /root/.local/bin/env
 # PEP 668 bloquea instalaciones en /usr. Este venv hereda el torch global de
 # la imagen PyTorch y evita crear una segunda copia pesada.
-uv venv --python /usr/local/bin/python3.12 --system-site-packages .venv
+uv venv --system-site-packages .venv
 source .venv/bin/activate
 uv pip install -e .
 uv pip install -r demo/requirements.txt
