@@ -2726,6 +2726,9 @@ body {
 .ident-title { color: var(--text); font-family: Georgia, "Times New Roman", serif; font-size: 24px; letter-spacing: -0.02em; }
 .ident-blurb { color: var(--text-dim); max-width: 42ch; }
 .ident-meta, .footer { color: var(--text-faint); }
+/* The demo is presented as our own assistant; keep upstream attribution out
+ * of the main visual header. The project link remains available in About. */
+.ident-meta { display: none !important; }
 .topbar-right .icon-btn, .icon-btn {
   color: var(--text-dim);
   background: rgba(255, 250, 242, 0.72);
