@@ -172,9 +172,27 @@ que no dependa del entorno de otra ventana de tmux.
 
 ### Scripts de arranque
 
-Después de clonar la rama de integración, el procedimiento está dividido en
-cuatro scripts. El primero se ejecuta una sola vez; los otros tres permanecen
-corriendo, uno por ventana de tmux:
+Después de clonar la rama de integración, copia primero el WAV desde tu
+computador. El Pod no puede leer directamente `C:\Users\...`.
+
+En el Pod:
+
+~~~bash
+mkdir -p /workspace/voices
+exit
+~~~
+
+En PowerShell local:
+
+~~~powershell
+scp -P PUERTO_SSH `
+  -i C:\Users\felip\.ssh\id_ed25519 `
+  "C:\Users\felip\Documents\Voicebot\data\voices\voz_referencia.wav" `
+  root@IP_DEL_POD:/workspace/voices/voz_referencia.wav
+~~~
+
+Vuelve a entrar por SSH y ejecuta el setup. El primero se ejecuta una sola vez;
+los otros tres permanecen corriendo, uno por ventana de tmux:
 
 ~~~bash
 cd /workspace/speech-to-speech

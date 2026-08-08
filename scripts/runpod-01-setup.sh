@@ -74,8 +74,13 @@ sf.write(dst, audio, 24000, subtype="PCM_16")
 print(f"Referencia normalizada: {dst} ({len(audio)/24000:.2f}s)")
 PY
 else
-  echo "Referencia normalizada: $VOICE_DIR/voz_referencia_normalizada.wav"
-  echo "Si aún no existe, copia el WAV y ejecuta otra vez este script."
+  if [[ -f "$VOICE_DIR/voz_referencia_normalizada.wav" ]]; then
+    echo "Referencia normalizada existente: $VOICE_DIR/voz_referencia_normalizada.wav"
+  else
+    echo "AVISO: falta $VOICE_DIR/voz_referencia.wav" >&2
+    echo "Cópialo desde PowerShell con scp y vuelve a ejecutar este script." >&2
+    echo "Ejemplo: scp -P PUERTO_SSH -i C:\\Users\\felip\\.ssh\\id_ed25519 \\\"voz_referencia.wav\\\" root@IP_DEL_POD:$VOICE_DIR/voz_referencia.wav" >&2
+  fi
 fi
 
 echo
