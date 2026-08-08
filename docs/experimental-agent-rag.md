@@ -21,6 +21,10 @@ DuckDuckGo directamente, limita cada respuesta a cinco resultados y aplica una
 cache breve. Puede sufrir límites del proveedor; no se utilizan Selenium,
 CAPTCHA bypass ni proxies rotatorios.
 
+La caché de voz clonada validada está versionada en `assets/voice-cache/`.
+`runpod-01-setup.sh` la copia a `/workspace/voices/cache`, y el pipeline la usa
+directamente sin volver a procesar el WAV.
+
 ## Directorios persistentes
 
 Monta un volumen en `/workspace` y prepara:

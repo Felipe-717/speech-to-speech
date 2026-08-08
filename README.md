@@ -83,15 +83,22 @@ Ejecuta en PowerShell el comando que entrega RunPod:
 ssh root@IP_DEL_POD -p PUERTO_SSH -i C:\Users\TU_USUARIO\.ssh\id_ed25519
 ```
 
-### 3. Clonar `main`
+### 3. Clonar la rama
 
 ```bash
 cd /workspace
-git clone -b main https://github.com/Felipe-717/speech-to-speech.git
+export S2S_BRANCH=feature/agent-rag-web  # usa main para la demo estable
+git clone -b "$S2S_BRANCH" https://github.com/Felipe-717/speech-to-speech.git
 cd /workspace/speech-to-speech
 ```
 
-### 4. Copiar la referencia de voz
+### 4. Referencia de voz (opcional)
+
+La caché de la voz clonada validada ya está incluida en
+`assets/voice-cache/`. El setup la copia automáticamente al volumen del Pod,
+por lo que no necesitas subir el WAV para probar esta demo.
+
+Si quieres regenerar la caché o usar otra voz, copia tu WAV:
 
 Desde la sesión SSH del Pod:
 
@@ -124,8 +131,9 @@ cd /workspace/speech-to-speech
 bash scripts/runpod-01-setup.sh
 ```
 
-El script instala las dependencias, prepara `llama` y genera
-`/workspace/voices/voz_referencia_normalizada.wav` en mono PCM16/24 kHz.
+El script instala las dependencias, prepara `llama` y copia la caché de voz
+incluida a `/workspace/voices/cache`. Si detecta un WAV personalizado, también
+lo normaliza a mono PCM16/24 kHz.
 
 ### 6. Abrir tmux y arrancar las tres ventanas
 
@@ -188,9 +196,9 @@ curl http://127.0.0.1:8765/health
 find /workspace/voices/cache -maxdepth 1 -type f -printf '%f\n'
 ```
 
-La caché debe contener, después del primer arranque de Qwen3-TTS, archivos
-`.spk`, `.rvq` y `.json`. Si no hay `.rvq`, se conserva la transcripción de la
-referencia y se utiliza el `.spk` disponible.
+La caché debe contener `.spk`, `.rvq` y `.json` antes de iniciar Qwen3-TTS.
+Estos archivos ya están incluidos en la rama experimental; si no hay `.rvq`,
+se conserva la transcripción y se utiliza el `.spk` disponible.
 
 ## Pruebas de la interfaz
 
@@ -235,9 +243,9 @@ node scripts/local-mic-harness.mjs
 
 ## Estado y límites actuales
 
-- No se incluye RAG todavía.
-- No se incluye cámara.
-- No se incluye entrada de texto.
+- La demo estable de `main` conserva voz, live y push-to-talk.
+- `feature/agent-rag-web` añade texto, RAG local, DuckDuckGo y tareas de fondo.
+- Consulta [la guía experimental](./docs/experimental-agent-rag.md) para esas funciones.
 - El modelo LLM fijado para la demo es
   `unsloth/gemma-4-12B-it-qat-GGUF:UD-Q4_K_XL`.
 - El modelo TTS fijado es `Qwen/Qwen3-TTS-12Hz-1.7B-Base`.
@@ -251,7 +259,7 @@ Al volver a iniciarlo:
 
 ```bash
 cd /workspace/speech-to-speech
-git pull --ff-only origin main
+git pull --ff-only origin BRANCH_ACTIVA
 source .venv/bin/activate
 bash scripts/runpod-02-llm.sh
 bash scripts/runpod-03-pipeline.sh

@@ -6,10 +6,16 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-BRANCH="${S2S_BRANCH:-main}"
 VOICE_DIR="${VOICE_DIR:-/workspace/voices}"
+BUNDLED_VOICE_CACHE_DIR="$REPO_DIR/assets/voice-cache"
 
 cd "$REPO_DIR"
+
+# Keep the checked-out branch by default. S2S_BRANCH can explicitly switch to
+# another remote branch, but cloning feature/agent-rag-web no longer silently
+# sends the Pod back to main.
+BRANCH="${S2S_BRANCH:-$(git branch --show-current 2>/dev/null || true)}"
+BRANCH="${BRANCH:-main}"
 
 if [[ -d .git ]]; then
   git fetch origin "$BRANCH"
@@ -51,6 +57,21 @@ export PATH="/root/.local/bin:$PATH"
 command -v llama >/dev/null
 
 mkdir -p "$VOICE_DIR/cache"
+
+# The validated cloned-voice cache is versioned with this branch. Copy it into
+# the persistent Pod volume only when that file is not already present, so a
+# user-provided/custom cache is never overwritten.
+if [[ -d "$BUNDLED_VOICE_CACHE_DIR" ]]; then
+  for cache_file in "$BUNDLED_VOICE_CACHE_DIR"/*.spk "$BUNDLED_VOICE_CACHE_DIR"/*.rvq "$BUNDLED_VOICE_CACHE_DIR"/*.json; do
+    [[ -f "$cache_file" ]] || continue
+    target="$VOICE_DIR/cache/$(basename "$cache_file")"
+    if [[ ! -f "$target" ]]; then
+      cp "$cache_file" "$target"
+      echo "Cache de voz copiada: $(basename "$cache_file")"
+    fi
+  done
+fi
+
 if [[ -f "$VOICE_DIR/voz_referencia.wav" && ! -f "$VOICE_DIR/voz_referencia_normalizada.wav" ]]; then
   python - <<'PY'
 import numpy as np
@@ -76,6 +97,8 @@ PY
 else
   if [[ -f "$VOICE_DIR/voz_referencia_normalizada.wav" ]]; then
     echo "Referencia normalizada existente: $VOICE_DIR/voz_referencia_normalizada.wav"
+  elif compgen -G "$VOICE_DIR/cache/*.spk" >/dev/null; then
+    echo "Cache de voz precomputada disponible; no hace falta copiar el WAV."
   else
     echo "AVISO: falta $VOICE_DIR/voz_referencia.wav" >&2
     echo "Cópialo desde PowerShell con scp y vuelve a ejecutar este script." >&2

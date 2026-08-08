@@ -1,393 +1,177 @@
-# Primer arranque en RunPod: receta completa
+# Primer arranque en RunPod
 
-Esta secuencia debe ejecutarse en orden. No iniciar modelos hasta que las comprobaciones pasen.
+Receta secuencial para la demo estable y para `feature/agent-rag-web`. La rama
+experimental mantiene el mismo pipeline de voz y añade texto, RAG y tareas de
+fondo.
 
-## 0. Configuración del Pod
-
-Antes de pulsar Deploy:
+## 0. Crear el Pod
 
 - GPU: NVIDIA RTX A6000 (48 GB).
 - Imagen: plantilla oficial PyTorch con CUDA 12.8.x.
 - Disco del contenedor: 50 GB mínimo.
-- Recomendado: Volume Disk de 40–60 GB montado en /workspace.
-- Puerto HTTP público: 7860.
-- Puerto 8765: interno, no es necesario publicarlo.
-- Habilitar acceso SSH.
+- Volume Disk recomendado: 40–60 GB montado en `/workspace`.
+- Puerto HTTP público: `7860`.
+- SSH habilitado.
 
-Sin Volume Disk, detener o reiniciar el Pod borra repositorio, entorno y cachés. Para una prueba única se puede continuar sin volumen, pero no se debe detener el Pod entre pasos.
+Sin volumen persistente, detener o destruir el Pod elimina el entorno, modelos,
+índice RAG y cachés. La caché de voz versionada en el repositorio se puede
+volver a copiar automáticamente, pero los modelos grandes tendrán que
+descargarse de nuevo.
 
-Importante: en un Pod sin volumen, no usar `Edit Pod` para añadir puertos después
-del despliegue. Declara `7860/http` al crear el Pod; si falta, crea un Pod nuevo
-con ese puerto desde el principio.
+## 1. Conectarse y comprobar la GPU
 
-## 1. Entrar por SSH
+Ejecuta el comando SSH que entrega RunPod desde PowerShell:
 
-En RunPod: Pods → Pod → Connect → SSH. Copiar el comando que muestra el panel y ejecutarlo desde PowerShell local:
+```powershell
+ssh root@IP_DEL_POD -p PUERTO_SSH -i C:\Users\TU_USUARIO\.ssh\id_ed25519
+```
 
-~~~powershell
-ssh root@IP_DEL_POD -p PUERTO -i C:\Users\TU_USUARIO\.ssh\id_ed25519
-~~~
-
-SSH es preferible al Web Terminal para procesos largos.
-
-## 2. Comprobar hardware antes de instalar
-
-Estos comandos no descargan modelos:
-
-~~~bash
-nvidia-smi
-python --version
-python -c "import torch; print('torch:', torch.__version__); print('torch CUDA:', torch.version.cuda); print('CUDA disponible:', torch.cuda.is_available()); print('GPU:', torch.cuda.get_device_name(0)); print('torch path:', torch.__file__); assert torch.cuda.is_available()"
-command -v uv
-command -v git
-~~~
-
-Esperamos Python 3.12.x, PyTorch 2.8.0+cu128 (o equivalente CUDA 12.8), CUDA disponible, RTX A6000 y torch path dentro de /usr/local/lib/python3.12/dist-packages.
-
-## 3. Clonar el fork
-
-~~~bash
-cd /workspace
-git clone -b main https://github.com/Felipe-717/speech-to-speech.git
-cd /workspace/speech-to-speech
-
-Para validar el agente experimental sin tocar `main`, usa la rama publicada
-`feature/agent-rag-web` al clonar o exporta antes del setup:
+En el Pod, antes de instalar:
 
 ```bash
-export S2S_BRANCH=feature/agent-rag-web
+nvidia-smi
+python --version
+python -c "import torch; print(torch.__version__); print(torch.version.cuda); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0)); print(torch.__file__)"
+command -v uv
+command -v git
 ```
-~~~
 
-## 4. Crear el entorno Python correcto
+Debe aparecer CUDA disponible y una RTX A6000. El `torch` debe venir de la
+imagen global, no de un wheel nuevo dentro del entorno virtual.
 
-La imagen ya trae PyTorch con CUDA. PEP 668 impide instalar directamente en /usr, por lo que creamos un venv que hereda los paquetes globales:
+## 2. Clonar la rama
 
-~~~bash
-uv venv --system-site-packages .venv
+Para esta rama experimental:
+
+```bash
+cd /workspace
+export S2S_BRANCH=feature/agent-rag-web
+git clone -b "$S2S_BRANCH" https://github.com/Felipe-717/speech-to-speech.git
+cd /workspace/speech-to-speech
+```
+
+Para la demo estable, usa `export S2S_BRANCH=main` y clona `main` en su lugar.
+
+## 3. Ejecutar el setup único
+
+Este script crea `.venv` con `--system-site-packages`, conserva el PyTorch/CUDA
+global, instala las dependencias, prepara `llama` y copia la caché de voz
+validada desde `assets/voice-cache/` a `/workspace/voices/cache`.
+
+```bash
+cd /workspace/speech-to-speech
+bash scripts/runpod-01-setup.sh
+```
+
+No uses `uv pip install --system`. Si ya existe `.venv`, el script lo reutiliza.
+Comprueba después:
+
+```bash
 source .venv/bin/activate
-which python
-python -c "import torch; print(torch.__version__); print(torch.__file__); print(torch.cuda.is_available())"
-~~~
-
-Debe aparecer .venv/bin/python, pero torch debe continuar en /usr/local/lib/python3.12/dist-packages/torch y CUDA debe ser True.
-
-## 5. Instalar dependencias dentro del venv
-
-Usar `pip` a traves del Python del venv. En esta imagen `pip` reconoce `torch`
-y `torchaudio` instalados globalmente y los deja intactos. No usar `uv pip install`
-para este paso: su resolvedor puede intentar descargar otra copia de PyTorch.
-
-~~~bash
-python -m pip install --dry-run -e .
-python -m pip install -e .
-python -m pip install -r demo/requirements.txt
-~~~
-
-En el `dry-run` deben aparecer `Requirement already satisfied` para torch y
-torchaudio con version `2.8.0+cu128`. Si propone descargar otra version de
-torch, detener con Ctrl+C.
-
-Durante la instalación, si aparece una descarga grande de torch, detener con Ctrl+C: se estaría creando una segunda copia. Después verificar:
-
-~~~bash
-source .venv/bin/activate
-python -c "import torch; print(torch.__version__); print(torch.__file__); print(torch.cuda.is_available())"
+python -c "import torch, torchaudio; print(torch.__version__, torchaudio.__version__, torch.cuda.is_available())"
 python -m pip check
-speech-to-speech --help | head -n 20
-~~~
+find /workspace/voices/cache -maxdepth 1 -type f -printf '%f\n'
+```
 
-## 6. Preparar Gemma
+La caché incluida contiene `.spk`, `.rvq` y `.json`; no hace falta subir el WAV
+para probar esta voz. Si deseas regenerarla o reemplazarla, copia un WAV propio
+con `scp` y el setup lo normalizará cuando no exista ya una caché utilizable:
 
-Con el venv activo:
-
-~~~bash
-if ! command -v llama >/dev/null 2>&1; then
-  curl -LsSf https://llama.app/install.sh | sh
-fi
-export PATH="/root/.local/bin:$PATH"
-llama --help | head -n 5
-~~~
-
-No usar `uv pip install --system`: la imagen marca `/usr` como entorno
-externamente administrado. Tampoco usar `uv venv --python /usr/local/bin/python3.12`;
-en esta imagen el ejecutable correcto es `/usr/local/bin/python` y `uv venv`
-lo encuentra automáticamente.
-
-Modelo:
-
-~~~text
-unsloth/gemma-4-12B-it-qat-GGUF:UD-Q4_K_XL
-~~~
-
-## 7. Preparar la referencia de voz
-
-Crear el directorio destino desde la sesión SSH del Pod:
-
-~~~bash
-mkdir -p /workspace/voices
-~~~
-
-Después, copiar el WAV desde PowerShell local al Pod. Sustituye `PUERTO_SSH`
-e `IP_DEL_POD` por los valores reales que aparecen en RunPod en
-`Connect → SSH`; no ejecutes esos textos literalmente:
-
-~~~powershell
-scp -P PUERTO_SSH -i C:\Users\TU_USUARIO\.ssh\id_ed25519 `
-  "C:\ruta\a\tu\voz_referencia.wav" `
-root@IP_DEL_POD:/workspace/voices/voz_referencia.wav
-~~~
-
-Comprueba que la copia terminó antes de normalizarla:
-
-~~~bash
-ls -lh /workspace/voices/voz_referencia.wav
-~~~
-
-En el Pod, crear una copia mono PCM16/24 kHz normalizada. El original no se
-modifica:
-
-~~~bash
-mkdir -p /workspace/voices/cache
-python - <<'PY'
-import numpy as np
-import soundfile as sf
-from scipy.signal import resample_poly
-
-src = "/workspace/voices/voz_referencia.wav"
-dst = "/workspace/voices/voz_referencia_normalizada.wav"
-audio, sample_rate = sf.read(src, dtype="float32", always_2d=False)
-audio = np.asarray(audio, dtype=np.float32)
-if audio.ndim > 1:
-    audio = audio.mean(axis=1)
-if sample_rate != 24000:
-    gcd = np.gcd(sample_rate, 24000)
-    audio = resample_poly(audio, 24000 // gcd, sample_rate // gcd).astype(np.float32)
-peak = float(np.max(np.abs(audio)))
-if peak <= 0:
-    raise ValueError("La referencia está completamente silenciosa")
-audio *= (10 ** (-3 / 20)) / peak
-sf.write(dst, audio, 24000, subtype="PCM_16")
-print(f"Escrito {dst}: {len(audio)/24000:.2f}s, pico={np.max(np.abs(audio)):.4f}")
-PY
-~~~
-
-La transcripción se declara en la misma ventana que arranca el pipeline para
-que no dependa del entorno de otra ventana de tmux.
-
-## 8. Arrancar los procesos
-
-### Scripts de arranque
-
-Después de clonar la rama de integración, copia primero el WAV desde tu
-computador. El Pod no puede leer directamente `C:\Users\...`.
-
-En el Pod:
-
-~~~bash
-mkdir -p /workspace/voices
-exit
-~~~
-
-En PowerShell local:
-
-~~~powershell
+```powershell
 scp -P PUERTO_SSH `
   -i C:\Users\TU_USUARIO\.ssh\id_ed25519 `
   "C:\ruta\a\tu\voz_referencia.wav" `
   root@IP_DEL_POD:/workspace/voices/voz_referencia.wav
-~~~
+```
 
-Vuelve a entrar por SSH y ejecuta el setup. El primero se ejecuta una sola vez;
-los otros tres permanecen corriendo, uno por ventana de tmux:
+## 4. Abrir tmux y ejecutar las ventanas
 
-~~~bash
-cd /workspace/speech-to-speech
-bash scripts/runpod-01-setup.sh
-~~~
-
-El setup crea `.venv` con `--system-site-packages`, conserva el Torch CUDA de
-la imagen, instala las dependencias, prepara `llama` y normaliza la referencia
-si ya existe en `/workspace/voices/voz_referencia.wav`.
-
-Luego abrir tres ventanas y ejecutar, en este orden:
-
-~~~bash
-bash scripts/runpod-02-llm.sh
-~~~
-
-~~~bash
-bash scripts/runpod-03-pipeline.sh
-~~~
-
-~~~bash
-bash scripts/runpod-04-frontend.sh
-~~~
-
-El script 03 reutiliza `scripts/runpod-pipeline.sh`; no hay que volver a pegar
-el comando largo de Parakeet/Qwen3-TTS. El script 04 fija el frontend en
-`0.0.0.0:7860` y el WebSocket interno en
-`ws://127.0.0.1:8765/v1/realtime`.
-
-Usar tmux para que las tres sesiones queden en el mismo SSH. Crear la sesión una
-sola vez:
-
-~~~bash
+```bash
 tmux new -s voicebot
-~~~
+```
 
-Dentro de tmux, `Ctrl+B` y luego `C` crea otra ventana; `Ctrl+B` y luego `0`,
-`1` o `2` cambia de ventana. Alternativamente, desde otra sesión SSH:
+En la ventana 0 ejecuta Gemma y déjalo corriendo:
 
-~~~bash
-tmux new-window -t voicebot -n pipeline
-tmux new-window -t voicebot -n frontend
-tmux attach -t voicebot
-~~~
+```bash
+bash scripts/runpod-02-llm.sh
+```
 
-Mantener el Pod encendido mientras se prueba.
+Pulsa `Ctrl+B`, luego `C`. En la ventana 1 ejecuta el pipeline de voz:
 
-### Terminal 1: Gemma
+```bash
+bash scripts/runpod-03-pipeline.sh
+```
 
-~~~bash
-cd /workspace/speech-to-speech
-source .venv/bin/activate
-llama serve \
-  -hf unsloth/gemma-4-12B-it-qat-GGUF:UD-Q4_K_XL \
-  --host 127.0.0.1 --port 8000 --jinja -c 8192 -ngl 99 \
-  --reasoning-budget 0 --reasoning-format none \
-  --chat-template-kwargs '{"enable_thinking":false}'
-~~~
+El lanzador usa automáticamente la caché `.spk/.rvq` incluida. Solo utiliza el
+WAV normalizado como fallback si no encuentra un `.spk`.
 
-Comprobar desde otra terminal:
+Pulsa `Ctrl+B`, luego `C` otra vez. En la ventana 2 ejecuta el frontend:
 
-~~~bash
+```bash
+bash scripts/runpod-04-frontend.sh
+```
+
+El frontend queda en `0.0.0.0:7860` y el pipeline realtime en
+`0.0.0.0:8765`.
+
+## 5. Comprobaciones del backend
+
+Desde otra sesión SSH:
+
+```bash
 curl http://127.0.0.1:8000/health
-curl http://127.0.0.1:8000/v1/chat/completions \
-  -H 'Content-Type: application/json' \
-  -d '{"model":"gemma-4-12B-it-qat-GGUF","messages":[{"role":"user","content":"Responde OK"}],"max_tokens":8}'
-~~~
-
-### Terminal 2: pipeline de voz (primera ejecución, crea la cache)
-
-Para evitar límites de pegado del Web Terminal, después de actualizar el repo se
-puede ejecutar el lanzador completo:
-
-~~~bash
-git pull --ff-only origin main
-bash scripts/runpod-pipeline.sh
-~~~
-
-El script comprueba que Gemma responda en el puerto 8000 y que exista el WAV
-normalizado antes de iniciar el pipeline.
-
-La forma manual equivalente es:
-
-~~~bash
-cd /workspace/speech-to-speech
-source .venv/bin/activate
-REF_TEXT='Sistemas en linea. Soy el asistente tecnico del equipo y estare disponible durante todo el montaje del robot. He revisado la biblioteca: contamos con el microcontrolador Raspberry Pi Pico, el encoder magnetico AS5600 y el controlador de motores DRV8833. El encoder responde en la direccion I2C cero equis treinta y seis. Antes del arranque conviene revisar el diseno del cableado y el ajuste de la llave de alimentacion. Empezamos por la alimentacion o por el control de los motores?'
-speech-to-speech serve \
-  --host 0.0.0.0 --port 8765 \
-  --stt parakeet-tdt \
-  --parakeet_tdt_device cuda \
-  --parakeet_tdt_compute_type float16 \
-  --llm_backend chat-completions \
-  --tts qwen3 \
-  --qwen3_tts_model_name Qwen/Qwen3-TTS-12Hz-1.7B-Base \
-  --qwen3_tts_device cuda \
-  --qwen3_tts_backend ggml \
-  --qwen3_tts_ref_audio /workspace/voices/voz_referencia_normalizada.wav \
-  --qwen3_tts_ref_text "$REF_TEXT" \
-  --qwen3_tts_ref_cache_dir /workspace/voices/cache \
-  --qwen3_tts_xvec_only false \
-  --qwen3_tts_language spanish \
-  --model_name gemma-4-12B-it-qat-GGUF \
-  --responses_api_base_url http://127.0.0.1:8000/v1 \
-  --responses_api_api_key local \
-  --responses_api_stream \
-  --enable_live_transcription
-~~~
-
-Cuando la primera generación termine, comprobar la cache:
-
-~~~bash
+curl http://127.0.0.1:8765/health
+curl http://127.0.0.1:7860/health
 find /workspace/voices/cache -maxdepth 1 -type f -printf '%f\n'
-~~~
+```
 
-Si existen `.spk` y `.rvq`, reiniciar el pipeline usando sus rutas. Si solo
-existe `.spk`, usar únicamente ese archivo:
+En la rama experimental, prepara el RAG si tienes documentos:
 
-~~~bash
---qwen3_tts_ref_spk /workspace/voices/cache/CACHE_KEY.spk \
---qwen3_tts_ref_rvq /workspace/voices/cache/CACHE_KEY.rvq \
---qwen3_tts_ref_text "$REF_TEXT"
-~~~
+```bash
+mkdir -p /workspace/knowledge /workspace/rag
+source /workspace/speech-to-speech/.venv/bin/activate
+python -m demo.rag ingest --path /workspace/knowledge
+python -m demo.rag status
+```
 
-### Terminal 3: frontend upstream
+El índice queda en `/workspace/rag/index.db` y sobrevive si `/workspace` es un
+volumen persistente. `ddgs` no necesita API key; si DuckDuckGo limita la
+consulta, la herramienta devuelve un error controlado.
 
-~~~bash
-cd /workspace/speech-to-speech/demo
-source ../.venv/bin/activate
-unset LOAD_BALANCER_URL SPEECH_TO_SPEECH_INTERNAL_URL
-export SPEECH_TO_SPEECH_URL=ws://127.0.0.1:8765/v1/realtime
-uvicorn server:app --host 0.0.0.0 --port 7860
-~~~
+## 6. Túnel local para el navegador
 
-Para el navegador, preferir un túnel SSH local. En PowerShell del computador:
+Mantén esta ventana de PowerShell abierta:
 
-~~~powershell
+```powershell
 ssh -N `
   -L 7860:127.0.0.1:7860 `
   -L 8765:127.0.0.1:8765 `
   -p PUERTO_SSH `
   -i C:\Users\TU_USUARIO\.ssh\id_ed25519 `
   root@IP_DEL_POD
-~~~
+```
 
-Mantener esa ventana abierta y abrir `http://localhost:7860`. Si el puerto
-7860 local está ocupado, usar `-L 8786:127.0.0.1:7860` y abrir
-`http://localhost:8786`; en ese caso también cambiar el puerto local del
-frontend únicamente, no el remoto 8765.
+Abre `http://localhost:7860`. Acepta únicamente el permiso del micrófono; la
+cámara está desactivada. El navegador debe mostrar un WebSocket `101` hacia
+`ws://localhost:8765/v1/realtime`.
 
-El proxy público también sirve para una comprobación rápida:
+## 7. Pruebas de la demo experimental
 
-~~~text
-https://POD_ID-7860.proxy.runpod.net
-~~~
+- En vivo: habla y haz una pausa; comprueba transcripción y respuesta hablada.
+- Push-to-talk: mantén pulsado el orbe o la barra espaciadora y suelta para
+  cerrar el turno.
+- Texto: escribe en el compositor mientras el micrófono está silenciado.
+- RAG: pregunta por un documento indexado y confirma las fuentes.
+- Web: solicita información actual y confirma resultados DuckDuckGo.
+- Tarea: pide una investigación larga; observa fases, progreso, fuentes y
+  cancelación. Pregunta por el estado mientras la tarea sigue activa.
 
-Pero `localhost` es preferible para el micrófono: evita problemas de origen,
-permisos y WebSocket del proxy público.
+En DevTools deben verse eventos `input_audio_buffer.append` y bloques de audio
+PCM16 mono de 16 kHz, aproximadamente 40 ms por bloque (1280 bytes antes de
+Base64).
 
-## 9. Criterio de éxito
+## 8. Detener
 
-1. La página carga.
-2. Push-to-talk abre el micrófono.
-3. Aparece la transcripción.
-4. Se escucha la voz clonada del WAV.
-5. El modo conversación responde.
-
-No añadir todavía RAG, cámara ni cambios de modelo.
-
-## 10. Detener y conservar datos
-
-- Con Volume Disk: detener conserva /workspace; terminar elimina el Pod.
-- Sin Volume Disk: detener o reiniciar borra repositorio, .venv, cachés y modelos.
-- Sin volumen, realizar toda la prueba en una sola sesión y terminar el Pod al acabar.
-
-Antes de detener un Pod sin volumen, confirmar que los cambios están publicados:
-
-~~~bash
-git status
-git log -1 --oneline
-~~~
-
-El código de esta demo se conserva en la rama `main` del fork;
-el entorno, modelos y cachés locales no.
-
-## Errores comunes
-
-- externally managed: se olvidó activar .venv o se usó --system.
-- torch aparece bajo .venv: se creó una segunda copia; detener y recrear el venv con --system-site-packages.
-- GPU no disponible: plantilla o Pod incorrecto.
-- speech-to-speech no existe: la instalación del proyecto no terminó.
+Con volumen persistente, detener el Pod conserva `/workspace`, incluida la
+caché y el índice RAG. Sin volumen, conserva el Pod encendido durante toda la
+prueba o tendrás que repetir instalación y descargas.

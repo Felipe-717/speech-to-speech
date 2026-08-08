@@ -69,7 +69,7 @@ backend, speaking the OpenAI Realtime **GA** protocol over **WebSocket**
    ```bash
    uv pip install -r demo/requirements.txt
    export SPEECH_TO_SPEECH_URL=ws://localhost:8765/v1/realtime
-   export SERPER_API_KEY=...   # optional; web search is disabled without it
+   # The experimental fork uses keyless DuckDuckGo search (`ddgs`).
    export STARTUP_GREETING=... # optional; empty disables the automatic greeting
    uv run uvicorn --app-dir demo server:app --reload --port 7860
    ```
@@ -216,10 +216,9 @@ guard the greeting so it is sent at most once per connection.
 The assistant can call two tools mid-conversation (toggle them from the **Tools**
 button, top-right):
 
-- **Web search** — Google results via Serper.dev, proxied server-side so the key
-  never reaches the browser. Set `SERPER_API_KEY` as an env var / Space secret.
-  Without it, the tool is disabled unless the user pastes their own key in the
-  Tools panel.
+- **Web search** — On `feature/agent-rag-web`, DuckDuckGo results are returned
+  through the local `ddgs` adapter and require no API key. The stable `main`
+  demo does not enable this experimental tool.
 - **Camera** — while enabled, a live self-view shows bottom-left; when the model
   calls the tool, the current frame is sent to the vision-language model so it can
   see what you're showing it.

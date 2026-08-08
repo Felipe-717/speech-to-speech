@@ -1,0 +1,1 @@
+{"append_silence": true, "audio_sha256": "0d2eec3eeae8e60cb517b3557d41f9d30601dd80ef23807c6008915ef3c44899", "dtype": "float32", "model_identity": "hf:Qwen/Qwen3-TTS-12Hz-1.7B-Base:BF16", "n_samples": 732000, "native_version": "7df559a (2026-07-17)", "sample_rate": 24000, "version": 1}
