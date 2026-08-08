@@ -9,6 +9,7 @@ const socket = createConnection(8765, "127.0.0.1");
 let buffer = Buffer.alloc(0);
 let upgraded = false;
 let sent = false;
+let finished = false;
 
 function frame(payload) {
   const body = Buffer.from(payload);
@@ -66,13 +67,23 @@ socket.on("data", chunk => {
   }
 });
 
-setTimeout(() => {
-  if (!sent) throw new Error("WebSocket test did not send events");
+const timeout = setTimeout(() => {
+  if (finished) return;
+  finished = true;
+  if (!sent) {
+    console.error("WebSocket test timed out before sending events");
+    process.exitCode = 1;
+    socket.destroy();
+    return;
+  }
   console.log("local WebSocket smoke passed: session.update, append(1280 bytes), commit");
   socket.destroy();
 }, 500);
 
 socket.on("error", error => {
+  if (finished) return;
+  finished = true;
+  clearTimeout(timeout);
   console.error(error.message);
   process.exitCode = 1;
 });
