@@ -81,14 +81,18 @@ git clone -b demo-foundation https://github.com/Felipe-717/speech-to-speech.git
 cd speech-to-speech
 curl -LsSf https://astral.sh/uv/install.sh | sh
 source /root/.local/bin/env
-uv venv --python 3.12
-source .venv/bin/activate
-uv pip install -e .
-uv pip install -r demo/requirements.txt
+# La imagen PyTorch ya trae torch+CUDA. --system conserva ese torch global
+# dentro del contenedor y evita crear una segunda copia pesada en un venv.
+uv pip install --system -e .
+uv pip install --system -r demo/requirements.txt
+python -c 'import torch; print(torch.__file__); print(torch.__version__, torch.version.cuda)'
 ```
 
 La primera instalación se hace una sola vez en el volumen persistente. No
 arrancar todavía el servidor si `nvidia-smi` o la prueba de PyTorch fallan.
+En este Pod no necesitamos un segundo aislamiento: el contenedor de RunPod ya
+es el aislamiento. Si más adelante se quiere un venv, debe crearse con
+`uv venv --system-site-packages` para que herede el torch global.
 
 ## Orden de arranque
 
@@ -117,9 +121,8 @@ curl http://127.0.0.1:8000/v1/chat/completions \
 Terminal 2: pipeline Realtime, con el backend escuchando solo dentro del Pod:
 
 ```bash
-source /workspace/speech-to-speech/.venv/bin/activate
 cd /workspace/speech-to-speech
-uv run speech-to-speech serve \
+speech-to-speech serve \
   --host 0.0.0.0 --port 8765 \
   --stt parakeet-tdt \
   --parakeet_tdt_device cuda \
@@ -139,7 +142,6 @@ uv run speech-to-speech serve \
 Terminal 3: frontend/proxy. El valor interno no se envía al navegador:
 
 ```bash
-source /workspace/speech-to-speech/.venv/bin/activate
 cd /workspace/speech-to-speech/demo
 export SPEECH_TO_SPEECH_INTERNAL_URL=ws://127.0.0.1:8765/v1/realtime
 export TTS_VOICE=Serena
