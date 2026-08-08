@@ -48,7 +48,7 @@ Esperamos Python 3.12.x, PyTorch 2.8.0+cu128 (o equivalente CUDA 12.8), CUDA dis
 
 ~~~bash
 cd /workspace
-git clone -b demo-foundation https://github.com/Felipe-717/speech-to-speech.git
+git clone -b front-upstream-integration https://github.com/Felipe-717/speech-to-speech.git
 cd /workspace/speech-to-speech
 ~~~
 
@@ -170,6 +170,40 @@ que no dependa del entorno de otra ventana de tmux.
 
 ## 8. Arrancar los procesos
 
+### Scripts de arranque
+
+Después de clonar la rama de integración, el procedimiento está dividido en
+cuatro scripts. El primero se ejecuta una sola vez; los otros tres permanecen
+corriendo, uno por ventana de tmux:
+
+~~~bash
+cd /workspace/speech-to-speech
+bash scripts/runpod-01-setup.sh
+~~~
+
+El setup crea `.venv` con `--system-site-packages`, conserva el Torch CUDA de
+la imagen, instala las dependencias, prepara `llama` y normaliza la referencia
+si ya existe en `/workspace/voices/voz_referencia.wav`.
+
+Luego abrir tres ventanas y ejecutar, en este orden:
+
+~~~bash
+bash scripts/runpod-02-llm.sh
+~~~
+
+~~~bash
+bash scripts/runpod-03-pipeline.sh
+~~~
+
+~~~bash
+bash scripts/runpod-04-frontend.sh
+~~~
+
+El script 03 reutiliza `scripts/runpod-pipeline.sh`; no hay que volver a pegar
+el comando largo de Parakeet/Qwen3-TTS. El script 04 fija el frontend en
+`0.0.0.0:7860` y el WebSocket interno en
+`ws://127.0.0.1:8765/v1/realtime`.
+
 Usar tmux para que las tres sesiones queden en el mismo SSH. Crear la sesión una
 sola vez:
 
@@ -215,7 +249,7 @@ Para evitar límites de pegado del Web Terminal, después de actualizar el repo 
 puede ejecutar el lanzador completo:
 
 ~~~bash
-git pull --ff-only origin demo-foundation
+git pull --ff-only origin front-upstream-integration
 bash scripts/runpod-pipeline.sh
 ~~~
 
@@ -323,7 +357,7 @@ git status
 git log -1 --oneline
 ~~~
 
-El código de esta demo se conserva en la rama `demo-foundation` del fork;
+El código de esta demo se conserva en la rama `front-upstream-integration` del fork;
 el entorno, modelos y cachés locales no.
 
 ## Errores comunes
