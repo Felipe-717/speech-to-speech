@@ -804,19 +804,34 @@ async function reproducirTexto(texto, boton) {
 
 async function abrirMicrofono() {
   if (ctx) { await asegurarSonando(); return; }
+  // Create and resume the AudioContext synchronously from the button gesture.
+  // Waiting for the permission prompt first can consume transient user
+  // activation in Chrome, leaving the context suspended and preventing the
+  // WebSocket connection from ever being opened.
+  const audioContext = new AudioContext({ sampleRate: SR });
   try {
+    await audioContext.resume();
     micStream = await navigator.mediaDevices.getUserMedia({
       audio: { channelCount:1, echoCancellation:true, noiseSuppression:true, autoGainControl:true }
     });
   } catch (e) {
+    await audioContext.close().catch(() => {});
     const motivo = !window.isSecureContext
       ? 'la página no es segura (usa localhost o https)'
       : e.name === 'NotAllowedError' ? 'no diste permiso al micrófono'
       : e.name === 'NotFoundError' ? 'no hay micrófono disponible' : e.message;
     throw new Error('No se pudo abrir el micrófono: ' + motivo);
   }
-  ctx = new AudioContext({ sampleRate: SR });
-  await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([WORKLET], { type:'text/javascript' })));
+  ctx = audioContext;
+  try {
+    await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([WORKLET], { type:'text/javascript' })));
+  } catch (e) {
+    micStream.getTracks().forEach(track => track.stop());
+    micStream = null;
+    await ctx.close().catch(() => {});
+    ctx = null;
+    throw new Error('No se pudo iniciar el audio del navegador: ' + e.message);
+  }
   nodoMic = ctx.createMediaStreamSource(micStream);
   worklet = new AudioWorkletNode(ctx, 'captura');
   worklet.port.onmessage = ({ data }) => {
