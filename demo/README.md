@@ -15,20 +15,19 @@ hf_oauth_expiration_minutes: 10080
 
 ## Felipe Voicebot foundation
 
-This fork currently uses the Spanish Voicebot screen as the presentation UI,
-but its transport is the repository's OpenAI Realtime WebSocket. The adapter in
-`ws/legacy-realtime-bridge.js` translates push-to-talk, live conversation,
-typed text, PCM microphone frames, transcripts, and streamed audio. The initial
-fixed female voice is Qwen3-TTS CustomVoice **Serena**; voice cloning is
-deliberately disabled until latency is measured.
+The demo uses the upstream browser client and worklets directly:
+`ws/s2s-ws-client.js`, `worklets/mic-capture.js`, and
+`worklets/audio-playback.js`. The former `legacy-realtime-bridge.js` was
+removed because it could open a WebSocket while dropping microphone frames
+before they reached the backend.
 
-The first paid RunPod test should validate only this vertical slice:
+The next RunPod test validates this vertical slice:
 
 1. Realtime backend starts and answers `session.created`.
 2. The browser connects over `ws(s)://.../v1/realtime`.
-3. Push-to-talk sends 48 kHz browser PCM converted to the backend's 16 kHz
-   mono PCM.
-4. Server VAD closes the turn and streams Serena audio plus transcripts.
+3. Push-to-talk sends 16 kHz mono PCM16 frames from the upstream capture
+   worklet.
+4. Server VAD closes the turn and streams cloned Spanish audio plus transcripts.
 
 The current fork does not yet claim that RAG or the Gemma GGUF model is wired.
 The first RunPod plan serves that GGUF through its model-card-supported
@@ -37,7 +36,7 @@ The first RunPod plan serves that GGUF through its model-card-supported
 GGUF support is still an experimental path in vLLM.
 
 For the paid first boot, follow [`docs/runpod-first-boot.md`](../docs/runpod-first-boot.md);
-it uses the demo's same-origin WebSocket proxy so only port 7860 is public.
+it uses a direct WebSocket URL through an SSH tunnel for ports 7860 and 8765.
 
 Browser voice-chat UI for the
 [huggingface/speech-to-speech](https://github.com/huggingface/speech-to-speech)

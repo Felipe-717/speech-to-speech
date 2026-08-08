@@ -113,7 +113,54 @@ Modelo:
 unsloth/gemma-4-12B-it-qat-GGUF:UD-Q4_K_XL
 ~~~
 
-## 7. Arrancar los procesos
+## 7. Preparar la referencia de voz
+
+Crear el directorio destino desde la sesión SSH del Pod:
+
+~~~bash
+mkdir -p /workspace/voices
+~~~
+
+Después, copiar el WAV desde PowerShell local al Pod:
+
+~~~powershell
+scp -P PUERTO_SSH -i C:\Users\felip\.ssh\id_ed25519 `
+  "C:\Users\felip\Documents\Voicebot\data\voices\voz_referencia.wav" `
+root@IP_DEL_POD:/workspace/voices/voz_referencia.wav
+~~~
+
+En el Pod, crear una copia mono PCM16/24 kHz normalizada. El original no se
+modifica:
+
+~~~bash
+mkdir -p /workspace/voices/cache
+python - <<'PY'
+import numpy as np
+import soundfile as sf
+from scipy.signal import resample_poly
+
+src = "/workspace/voices/voz_referencia.wav"
+dst = "/workspace/voices/voz_referencia_normalizada.wav"
+audio, sample_rate = sf.read(src, dtype="float32", always_2d=False)
+audio = np.asarray(audio, dtype=np.float32)
+if audio.ndim > 1:
+    audio = audio.mean(axis=1)
+if sample_rate != 24000:
+    gcd = np.gcd(sample_rate, 24000)
+    audio = resample_poly(audio, 24000 // gcd, sample_rate // gcd).astype(np.float32)
+peak = float(np.max(np.abs(audio)))
+if peak <= 0:
+    raise ValueError("La referencia está completamente silenciosa")
+audio *= (10 ** (-3 / 20)) / peak
+sf.write(dst, audio, 24000, subtype="PCM_16")
+print(f"Escrito {dst}: {len(audio)/24000:.2f}s, pico={np.max(np.abs(audio)):.4f}")
+PY
+~~~
+
+La transcripción se declara en la misma ventana que arranca el pipeline para
+que no dependa del entorno de otra ventana de tmux.
+
+## 8. Arrancar los procesos
 
 Usar tmux para que las tres sesiones queden en el mismo SSH. Crear la sesión una
 sola vez:
@@ -154,11 +201,12 @@ curl http://127.0.0.1:8000/v1/chat/completions \
   -d '{"model":"gemma-4-12B-it-qat-GGUF","messages":[{"role":"user","content":"Responde OK"}],"max_tokens":8}'
 ~~~
 
-### Terminal 2: pipeline de voz
+### Terminal 2: pipeline de voz (primera ejecución, crea la cache)
 
 ~~~bash
 cd /workspace/speech-to-speech
 source .venv/bin/activate
+REF_TEXT='Sistemas en linea. Soy el asistente tecnico del equipo y estare disponible durante todo el montaje del robot. He revisado la biblioteca: contamos con el microcontrolador Raspberry Pi Pico, el encoder magnetico AS5600 y el controlador de motores DRV8833. El encoder responde en la direccion I2C cero equis treinta y seis. Antes del arranque conviene revisar el diseno del cableado y el ajuste de la llave de alimentacion. Empezamos por la alimentacion o por el control de los motores?'
 speech-to-speech serve \
   --host 0.0.0.0 --port 8765 \
   --stt parakeet-tdt \
@@ -166,9 +214,13 @@ speech-to-speech serve \
   --parakeet_tdt_compute_type float16 \
   --llm_backend chat-completions \
   --tts qwen3 \
+  --qwen3_tts_model_name Qwen/Qwen3-TTS-12Hz-1.7B-Base \
   --qwen3_tts_device cuda \
   --qwen3_tts_backend ggml \
-  --qwen3_tts_speaker Serena \
+  --qwen3_tts_ref_audio /workspace/voices/voz_referencia_normalizada.wav \
+  --qwen3_tts_ref_text "$REF_TEXT" \
+  --qwen3_tts_ref_cache_dir /workspace/voices/cache \
+  --qwen3_tts_xvec_only false \
   --qwen3_tts_language spanish \
   --model_name gemma-4-12B-it-qat-GGUF \
   --responses_api_base_url http://127.0.0.1:8000/v1 \
@@ -177,25 +229,46 @@ speech-to-speech serve \
   --enable_live_transcription
 ~~~
 
-### Terminal 3: frontend y proxy
+Cuando la primera generación termine, comprobar la cache:
+
+~~~bash
+find /workspace/voices/cache -maxdepth 1 -type f -printf '%f\n'
+~~~
+
+Si existen `.spk` y `.rvq`, reiniciar el pipeline usando sus rutas. Si solo
+existe `.spk`, usar únicamente ese archivo:
+
+~~~bash
+--qwen3_tts_ref_spk /workspace/voices/cache/CACHE_KEY.spk \
+--qwen3_tts_ref_rvq /workspace/voices/cache/CACHE_KEY.rvq \
+--qwen3_tts_ref_text "$REF_TEXT"
+~~~
+
+### Terminal 3: frontend upstream
 
 ~~~bash
 cd /workspace/speech-to-speech/demo
 source ../.venv/bin/activate
-export SPEECH_TO_SPEECH_INTERNAL_URL=ws://127.0.0.1:8765/v1/realtime
-export TTS_VOICE=Serena
+unset SPEECH_TO_SPEECH_INTERNAL_URL
+export SPEECH_TO_SPEECH_URL=ws://127.0.0.1:8765/v1/realtime
 uvicorn server:app --host 0.0.0.0 --port 7860
 ~~~
 
 Para el navegador, preferir un túnel SSH local. En PowerShell del computador:
 
 ~~~powershell
-ssh -N -L 7860:127.0.0.1:7860 -p PUERTO_SSH -i C:\Users\felip\.ssh\id_ed25519 root@IP_DEL_POD
+ssh -N `
+  -L 7860:127.0.0.1:7860 `
+  -L 8765:127.0.0.1:8765 `
+  -p PUERTO_SSH `
+  -i C:\Users\felip\.ssh\id_ed25519 `
+  root@IP_DEL_POD
 ~~~
 
 Mantener esa ventana abierta y abrir `http://localhost:7860`. Si el puerto
 7860 local está ocupado, usar `-L 8786:127.0.0.1:7860` y abrir
-`http://localhost:8786`.
+`http://localhost:8786`; en ese caso también cambiar el puerto local del
+frontend únicamente, no el remoto 8765.
 
 El proxy público también sirve para una comprobación rápida:
 
@@ -206,17 +279,17 @@ https://POD_ID-7860.proxy.runpod.net
 Pero `localhost` es preferible para el micrófono: evita problemas de origen,
 permisos y WebSocket del proxy público.
 
-## 8. Criterio de éxito
+## 9. Criterio de éxito
 
 1. La página carga.
 2. Push-to-talk abre el micrófono.
 3. Aparece la transcripción.
-4. Se escucha Serena.
+4. Se escucha la voz clonada del WAV.
 5. El modo conversación responde.
 
-No añadir todavía RAG, cámara, clonación de voz ni cambios de modelo.
+No añadir todavía RAG, cámara ni cambios de modelo.
 
-## 9. Detener y conservar datos
+## 10. Detener y conservar datos
 
 - Con Volume Disk: detener conserva /workspace; terminar elimina el Pod.
 - Sin Volume Disk: detener o reiniciar borra repositorio, .venv, cachés y modelos.
