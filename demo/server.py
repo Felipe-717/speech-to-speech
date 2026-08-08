@@ -29,6 +29,7 @@ Endpoints:
   GET  /api/me               -> login + tier + remaining budget (LB mode only)
   POST /api/search           -> { results } DuckDuckGo via ddgs
   POST /api/rag/search       -> local RAG snippets
+  POST /api/rag/upload       -> persist and index uploaded PDFs
   POST /api/tasks             -> create a background task
   GET  /api/tasks/{id}        -> task snapshot
   GET  /api/tasks/{id}/events -> task progress (SSE)
@@ -52,13 +53,15 @@ import asyncio
 import json
 import logging
 import os
+from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
+from uuid import uuid4
 
 import auth
 import httpx
 import limiter
 import websockets
-from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -150,6 +153,8 @@ def _webrtc_calls_url(s2s_url: str) -> str:
 
 # Cap results so the tool output stays small enough to feed back to the model.
 MAX_RESULTS = 5
+MAX_UPLOAD_FILES = 10
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 HERE = os.path.dirname(os.path.abspath(__file__))
 LB_USER_AGENT = "speech-to-speech-demo"
 
@@ -196,6 +201,14 @@ class RagSearchRequest(BaseModel):
 class TaskCreateRequest(BaseModel):
     goal: str
     session_id: str = "anonymous"
+
+
+def _safe_upload_name(filename: str | None) -> str:
+    """Return a flat, PDF-only filename safe to store in the knowledge folder."""
+    name = Path((filename or "").replace("\\", "/")).name.strip()
+    if not name or Path(name).suffix.lower() != ".pdf":
+        raise ValueError("Solo se pueden cargar archivos PDF.")
+    return name
 
 
 @app.get("/health")
@@ -349,6 +362,55 @@ async def rag_search(req: RagSearchRequest):
         raise HTTPException(status_code=400, detail="Empty query.")
     results = await asyncio.to_thread(rag_index.search, query, max(1, min(req.limit, 10)))
     return JSONResponse({"query": query, "results": results})
+
+
+@app.post("/api/rag/upload")
+async def rag_upload(files: list[UploadFile] = File(...)):
+    """Persist uploaded PDFs in the knowledge volume and index them immediately."""
+    if not files:
+        raise HTTPException(status_code=400, detail="Selecciona al menos un PDF.")
+    if len(files) > MAX_UPLOAD_FILES:
+        raise HTTPException(status_code=400, detail=f"Puedes cargar como máximo {MAX_UPLOAD_FILES} PDF a la vez.")
+
+    knowledge_root = Path(os.environ.get("KNOWLEDGE_ROOT") or "/workspace/knowledge")
+    if not Path("/workspace").exists() and not os.environ.get("KNOWLEDGE_ROOT"):
+        knowledge_root = Path(__file__).resolve().parent.parent / "data" / "knowledge"
+    knowledge_root.mkdir(parents=True, exist_ok=True)
+    uploaded: list[dict[str, object]] = []
+    errors: list[dict[str, str]] = []
+
+    for upload in files:
+        try:
+            filename = _safe_upload_name(upload.filename)
+            content = await upload.read(MAX_UPLOAD_BYTES + 1)
+            if len(content) > MAX_UPLOAD_BYTES:
+                raise ValueError("El PDF supera el límite de 25 MB.")
+            if not content:
+                raise ValueError("El archivo está vacío.")
+            destination = knowledge_root / filename
+            temporary = knowledge_root / f".{filename}.{uuid4().hex}.upload"
+            previous = await asyncio.to_thread(destination.read_bytes) if destination.exists() else None
+            await asyncio.to_thread(temporary.write_bytes, content)
+            try:
+                await asyncio.to_thread(temporary.replace, destination)
+                chunks = await asyncio.to_thread(rag_index.ingest_path, destination)
+            except Exception:
+                if previous is None:
+                    destination.unlink(missing_ok=True)
+                else:
+                    await asyncio.to_thread(destination.write_bytes, previous)
+                raise
+            finally:
+                temporary.unlink(missing_ok=True)
+            uploaded.append({"filename": filename, "chunks": chunks})
+        except Exception as exc:
+            errors.append({"filename": upload.filename or "(sin nombre)", "error": str(exc)})
+        finally:
+            await upload.close()
+
+    if not uploaded and errors:
+        raise HTTPException(status_code=400, detail=errors[0]["error"])
+    return JSONResponse({"uploaded": uploaded, "errors": errors, "rag": rag_index.status()})
 
 
 @app.post("/api/tasks")

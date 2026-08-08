@@ -262,7 +262,23 @@ class RagIndex:
         with self._connect() as conn:
             sources = int(conn.execute("SELECT COUNT(*) FROM sources").fetchone()[0])
             chunks = int(conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0])
-        return {"db": str(self.db_path), "sources": sources, "chunks": chunks}
+            # A PDF contributes one source row per page; collapse those rows so
+            # the UI can report the number of uploaded documents, not pages.
+            documents = int(
+                conn.execute(
+                    """
+                    SELECT COUNT(*) FROM (
+                        SELECT DISTINCT CASE
+                            WHEN instr(source, '#page=') > 0
+                            THEN substr(source, 1, instr(source, '#page=') - 1)
+                            ELSE source
+                        END AS document
+                        FROM sources
+                    )
+                    """
+                ).fetchone()[0]
+            )
+        return {"db": str(self.db_path), "sources": sources, "documents": documents, "chunks": chunks}
 
     def rebuild(self) -> dict[str, int | str]:
         with self._connect() as conn:

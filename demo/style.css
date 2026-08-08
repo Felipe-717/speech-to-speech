@@ -872,6 +872,26 @@ a:hover {
   box-shadow: 0 12px 30px rgba(89, 66, 47, 0.1);
   text-align: left;
 }
+
+.knowledge-card {
+  width: min(280px, 22vw);
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  background: rgba(255, 252, 247, 0.9);
+  box-shadow: 0 12px 30px rgba(89, 66, 47, 0.1);
+  text-align: left;
+}
+.knowledge-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.knowledge-eyebrow { color: var(--accent); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
+.knowledge-card h2 { margin: 4px 0 0; font-size: 16px; font-weight: 600; }
+.knowledge-chunks { color: var(--text-faint); font-family: var(--font-mono); font-size: 10px; white-space: nowrap; }
+.knowledge-card p { margin: 9px 0 12px; color: var(--text-dim); font-size: 11px; line-height: 1.45; }
+.knowledge-upload { border: 1px solid var(--border-strong); border-radius: 999px; padding: 7px 11px; background: var(--accent); color: #fff; font: inherit; font-size: 11px; cursor: pointer; }
+.knowledge-upload:hover { filter: brightness(1.04); }
+.knowledge-upload:disabled { cursor: wait; opacity: .65; }
+
 .task-card[hidden] { display: none; }
 .task-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .task-eyebrow { color: var(--accent); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
@@ -3077,7 +3097,7 @@ body.voice-only-demo .bubble-stack, .bubble-stack {
 
 @media (max-width: 1100px) {
   .legacy-stage { grid-template-columns: minmax(150px, 1fr) minmax(310px, 440px) minmax(150px, 1fr); gap: 12px 18px; padding-inline: 20px; }
-  .legacy-side .tarjeta-fija, .legacy-column { width: min(100%, 250px); }
+  .legacy-side .tarjeta-fija, .legacy-column, .knowledge-card { width: min(100%, 250px); }
   .legacy-statusbar .chip { display: none; }
 }
 @media (max-width: 760px) {
@@ -3095,7 +3115,7 @@ body.voice-only-demo .bubble-stack, .bubble-stack {
   .legacy-left, .legacy-right { grid-column: 1; grid-row: auto; align-items: stretch; }
   .legacy-left { order: 5; }
   .legacy-right { order: 6; }
-  .legacy-side .tarjeta-fija, .legacy-column { width: 100%; }
+  .legacy-side .tarjeta-fija, .legacy-column, .knowledge-card { width: 100%; }
   .legacy-column { min-height: 70px; }
   .bubble-stack { right: 16px; left: 16px; width: auto; bottom: 74px; }
 }

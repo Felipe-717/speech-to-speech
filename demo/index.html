@@ -83,6 +83,18 @@
             <p class="titulo-dato" id="sistemaTitulo">Listo para conversar</p>
             <p id="sistemaDetalle">ASR Parakeet · Gemma · Qwen3-TTS</p>
           </section>
+          <section id="knowledge-card" class="knowledge-card" aria-live="polite">
+            <div class="knowledge-card-head">
+              <div>
+                <span class="knowledge-eyebrow">Documentos</span>
+                <h2 id="knowledge-count">0 documentos</h2>
+              </div>
+              <span id="knowledge-chunks" class="knowledge-chunks">0 fragmentos</span>
+            </div>
+            <p id="knowledge-message">Carga PDFs para que el asistente pueda consultarlos.</p>
+            <input id="knowledge-files" type="file" accept="application/pdf,.pdf" multiple hidden />
+            <button id="knowledge-upload" class="knowledge-upload" type="button">Cargar PDFs</button>
+          </section>
           <div class="legacy-column" id="columnaUsuario" aria-live="polite"></div>
         </aside>
 

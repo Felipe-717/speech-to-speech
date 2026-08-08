@@ -338,6 +338,16 @@ const taskMessage = $("#task-message");
 const taskCancel = $("#task-cancel");
 /** @type {HTMLElement} */
 const taskSources = $("#task-sources");
+/** @type {HTMLElement} */
+const knowledgeCount = $("#knowledge-count");
+/** @type {HTMLElement} */
+const knowledgeChunks = $("#knowledge-chunks");
+/** @type {HTMLElement} */
+const knowledgeMessage = $("#knowledge-message");
+/** @type {HTMLInputElement} */
+const knowledgeFiles = $("#knowledge-files");
+/** @type {HTMLButtonElement} */
+const knowledgeUpload = $("#knowledge-upload");
 
 /** @type {HTMLInputElement} */
 const inputLbUrl = $("#lb-url");
@@ -1121,6 +1131,44 @@ async function execKnowledgeSearch(query) {
   return data.results.map((item) => `- ${item.title || item.source}: ${item.text} (${item.source})`).join("\n");
 }
 
+function renderKnowledgeStatus(status) {
+  const documents = Number(status?.documents ?? status?.sources ?? 0);
+  const chunks = Number(status?.chunks ?? 0);
+  knowledgeCount.textContent = `${documents} documento${documents === 1 ? "" : "s"}`;
+  knowledgeChunks.textContent = `${chunks} fragmento${chunks === 1 ? "" : "s"}`;
+}
+
+async function uploadKnowledgePdfs(files) {
+  if (!files.length) return;
+  knowledgeUpload.disabled = true;
+  knowledgeUpload.textContent = "Subiendo…";
+  knowledgeMessage.textContent = `Indexando ${files.length} PDF${files.length === 1 ? "" : "s"}…`;
+  const form = new FormData();
+  for (const file of files) form.append("files", file, file.name);
+  try {
+    const response = await fetch("api/rag/upload", { method: "POST", body: form });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.detail || `Error al cargar (${response.status})`);
+    renderKnowledgeStatus(data.rag);
+    const uploaded = Array.isArray(data.uploaded) ? data.uploaded.length : 0;
+    const errors = Array.isArray(data.errors) ? data.errors : [];
+    knowledgeMessage.textContent = errors.length
+      ? `${uploaded} cargado${uploaded === 1 ? "" : "s"}; ${errors.length} no se pudo${errors.length === 1 ? "" : "ieron"} indexar.`
+      : `${uploaded} PDF${uploaded === 1 ? "" : "s"} listo${uploaded === 1 ? "" : "s"} para consultar.`;
+  } catch (error) {
+    knowledgeMessage.textContent = error instanceof Error ? error.message : "No se pudieron cargar los PDFs.";
+  } finally {
+    knowledgeUpload.disabled = false;
+    knowledgeUpload.textContent = "Cargar PDFs";
+    knowledgeFiles.value = "";
+  }
+}
+
+knowledgeUpload.addEventListener("click", () => knowledgeFiles.click());
+knowledgeFiles.addEventListener("change", () => {
+  void uploadKnowledgePdfs(Array.from(knowledgeFiles.files || []));
+});
+
 async function runTool(name, argsJson, callId) {
   if (!client) return { output: "" };
   let args = /** @type {Record<string, unknown>} */ ({});
@@ -1213,6 +1261,7 @@ async function fetchConfig() {
     if (res.ok) {
       const json = await res.json();
       serverSearchKey = !!json.search;
+      renderKnowledgeStatus(json.rag);
       lbMode = !!json.lb;
       // Lock to LB mode only when the deploy reports a load balancer.
       allowDirect = json.allowDirect ?? !lbMode;
