@@ -190,7 +190,7 @@ const httpServer = createServer(async (req, res) => {
   }
   if (req.url === "/api/config") {
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ search: false, lb: false, allowDirect: false, s2sUrl: `ws://127.0.0.1:${WS_PORT}/v1/realtime`, rtc: false, iceServers: [], startupGreeting: "", auth: false }));
+    res.end(JSON.stringify({ search: false, lb: false, allowDirect: true, s2sUrl: `ws://127.0.0.1:${WS_PORT}/v1/realtime`, rtc: false, iceServers: [], startupGreeting: "", auth: false }));
     return;
   }
   if (req.url === "/api/me") {
