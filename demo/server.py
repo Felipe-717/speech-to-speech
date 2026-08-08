@@ -112,8 +112,8 @@ def _parse_ice_servers(raw: str) -> list:
 
 RTC_ICE_SERVERS = _parse_ice_servers(os.environ.get("RTC_ICE_SERVERS", ""))
 DEFAULT_STARTUP_GREETING = (
-    "Start the conversation now with a brief, spontaneous greeting in character. "
-    "Keep it to one sentence, invite the user in naturally, and vary the wording each time."
+    "Inicia la conversación ahora con un saludo breve y espontáneo en español. "
+    "Usa una sola frase, invita al usuario a hablar de forma natural y varía la formulación cada vez."
 )
 # Exposed to the browser through /api/config. Set an empty value to disable the
 # automatic greeting without changing the client bundle.

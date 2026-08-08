@@ -29,8 +29,10 @@ const DEFAULT_VOICE = "Aiden";
 // tools, text, or camera controls that are not part of the validated demo.
 const VOICE_ONLY_DEMO = true;
 const DEFAULT_INSTRUCTIONS =
-  "You are a friendly voice assistant. " +
-  "Keep replies short, warm, and spoken. Avoid long monologues.";
+  "Eres un asistente de voz amable y natural. Responde siempre en español, " +
+  "con respuestas breves, cálidas y fáciles de escuchar. Evita los monólogos largos.";
+const LEGACY_ENGLISH_INSTRUCTIONS =
+  "You are a friendly voice assistant. Keep replies short, warm, and spoken. Avoid long monologues.";
 
 // Appended to the user's instructions whenever at least one tool is enabled.
 // Stops the model from announcing capabilities ("Yes, I can search") and then
@@ -124,10 +126,14 @@ const SNAPSHOT_LADDER = /** @type {[number, number][]} */ ([
 ]);
 
 function loadSettings() {
+  const storedInstructions = localStorage.getItem(STORAGE_KEYS.instructions) || "";
   return {
     directUrl: localStorage.getItem(STORAGE_KEYS.directUrl) || "",
     voice: localStorage.getItem(STORAGE_KEYS.voice) || DEFAULT_VOICE,
-    instructions: localStorage.getItem(STORAGE_KEYS.instructions) || DEFAULT_INSTRUCTIONS,
+    instructions:
+      storedInstructions && storedInstructions !== LEGACY_ENGLISH_INSTRUCTIONS
+        ? storedInstructions
+        : DEFAULT_INSTRUCTIONS,
     noiseGate: loadGateThreshold(),
     // Default WebSocket: the proven path stays the first-run experience.
     transport: localStorage.getItem(STORAGE_KEYS.transport) === "webrtc" ? "webrtc" : "ws",
