@@ -115,7 +115,9 @@ cd /workspace/speech-to-speech
 source .venv/bin/activate
 llama serve \
   -hf unsloth/gemma-4-12B-it-qat-GGUF:UD-Q4_K_XL \
-  --host 127.0.0.1 --port 8000 --jinja -c 8192 -ngl 99
+  --host 127.0.0.1 --port 8000 --jinja -c 8192 -ngl 99 \
+  --reasoning-budget 0 --reasoning-format none \
+  --chat-template-kwargs '{"enable_thinking":false}'
 ~~~
 
 Comprobar desde otra terminal:

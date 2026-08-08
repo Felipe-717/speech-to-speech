@@ -39,6 +39,17 @@ from speech_to_speech.utils.utils import _generate_id
 
 logger = logging.getLogger(__name__)
 
+_GEMMA_THOUGHT_MARKER = "<|channel>thought"
+_GEMMA_CHANNEL_END = "<channel|>"
+
+
+def _clean_model_text(text: str) -> str:
+    """Remove Gemma 4's empty thought-channel prefix from final text."""
+    marker_end = text.find(_GEMMA_CHANNEL_END, len(_GEMMA_THOUGHT_MARKER))
+    if text.startswith(_GEMMA_THOUGHT_MARKER) and marker_end >= 0:
+        return text[marker_end + len(_GEMMA_CHANNEL_END) :]
+    return text
+
 
 def _to_chat_tools(req_tools: Any) -> list[ChatCompletionToolParam] | None:
     """Convert Responses-API function tools to Chat-Completions tool format.
@@ -204,6 +215,32 @@ def _iter_chat_stream_events(api_response: Stream[ChatCompletionChunk]) -> Itera
     tool_accum: dict[int, dict[str, str]] = {}
     usage: Usage | None = None
     raw_text = ""
+    pending_prefix = ""
+    thought_prefix_removed = False
+
+    def clean_stream_piece(piece: str) -> str:
+        """Strip Gemma's channel prefix without leaking split marker chunks."""
+        nonlocal pending_prefix, thought_prefix_removed
+        if thought_prefix_removed:
+            return piece
+
+        candidate = pending_prefix + piece
+        if candidate.startswith(_GEMMA_THOUGHT_MARKER):
+            marker_end = candidate.find(_GEMMA_CHANNEL_END, len(_GEMMA_THOUGHT_MARKER))
+            if marker_end < 0:
+                pending_prefix = candidate
+                return ""
+            thought_prefix_removed = True
+            pending_prefix = ""
+            return candidate[marker_end + len(_GEMMA_CHANNEL_END) :]
+
+        if _GEMMA_THOUGHT_MARKER.startswith(candidate):
+            pending_prefix = candidate
+            return ""
+
+        pending_prefix = ""
+        return candidate
+
     for chunk in api_response:
         if chunk.usage is not None:
             usage = Usage(
@@ -225,8 +262,14 @@ def _iter_chat_stream_events(api_response: Stream[ChatCompletionChunk]) -> Itera
                         entry["args"] += tool_call.function.arguments
         text_piece = delta.content or getattr(delta, "refusal", None)
         if text_piece:
-            raw_text += text_piece
-            yield TextDelta(text=text_piece)
+            cleaned_piece = clean_stream_piece(text_piece)
+            if cleaned_piece:
+                raw_text += cleaned_piece
+                yield TextDelta(text=cleaned_piece)
+
+    if pending_prefix:
+        raw_text += pending_prefix
+        yield TextDelta(text=pending_prefix)
 
     if raw_text.strip():
         yield AssistantMessage(content=[AssistantContent(type="output_text", text=raw_text)])
@@ -244,6 +287,8 @@ def _iter_chat_response_events(api_response: Any) -> Iterator[ProviderEvent]:
     if message is None:
         return
     raw_content = message.content or getattr(message, "refusal", None)
+    if raw_content:
+        raw_content = _clean_model_text(raw_content)
     if raw_content:
         yield AssistantMessage(content=[AssistantContent(type="output_text", text=raw_content)])
         yield TextDelta(text=raw_content)
@@ -299,7 +344,7 @@ class ChatCompletionsApiModelHandler(BaseOpenAICompatibleHandler):
                 extra_body=extra_body,
                 timeout=timeout,
             )
-            return response.choices[0].message.content or ""
+            return _clean_model_text(response.choices[0].message.content or "")
 
         return generate
 
