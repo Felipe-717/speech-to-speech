@@ -151,6 +151,68 @@ if (JSON.stringify(turnEvents) !== JSON.stringify(expectedTurns)) {
     )
 
 
+def test_websocket_client_live_mode_forwards_pcm_frames():
+    _run_node(
+        """
+globalThis.localStorage = { getItem() { return null; } };
+globalThis.WebSocket = { OPEN: 1 };
+const { S2sWsRealtimeClient } = await import("./demo/ws/s2s-ws-client.js");
+const sent = [];
+const client = new S2sWsRealtimeClient({
+  voice: "Aiden",
+  instructions: "Be helpful.",
+  directUrl: "ws://unused",
+  inputMode: "live",
+});
+client._ws = { readyState: 1, send(payload) { sent.push(JSON.parse(payload)); } };
+client._sessionConfigured = true;
+const frame = new Int16Array(640);
+frame.fill(1234);
+client._onMicChunk(frame.buffer);
+if (sent.length !== 1 || sent[0].type !== "input_audio_buffer.append") {
+  throw new Error("live mode did not append one frame");
+}
+const bytes = Buffer.from(sent[0].audio, "base64");
+if (bytes.length !== 1280 || bytes.readInt16LE(0) !== 1234) {
+  throw new Error(`unexpected live frame: ${bytes.length} bytes`);
+}
+"""
+    )
+
+
+def test_websocket_client_ptt_sends_silence_until_pressed():
+    _run_node(
+        """
+globalThis.localStorage = { getItem() { return null; } };
+globalThis.WebSocket = { OPEN: 1 };
+const { S2sWsRealtimeClient } = await import("./demo/ws/s2s-ws-client.js");
+const sent = [];
+const client = new S2sWsRealtimeClient({
+  voice: "Aiden",
+  instructions: "Be helpful.",
+  directUrl: "ws://unused",
+  inputMode: "ptt",
+});
+client._ws = { readyState: 1, send(payload) { sent.push(JSON.parse(payload)); } };
+client._sessionConfigured = true;
+const frame = new Int16Array(640);
+frame.fill(1234);
+client._onMicChunk(frame.buffer);
+client.setPushToTalk(true);
+client._onMicChunk(frame.buffer);
+if (sent.length !== 2) throw new Error("PTT did not append both clock frames");
+const quiet = Buffer.from(sent[0].audio, "base64");
+const speech = Buffer.from(sent[1].audio, "base64");
+if (quiet.length !== 1280 || quiet.some((value) => value !== 0)) {
+  throw new Error("PTT idle frame was not silence");
+}
+if (speech.length !== 1280 || speech.readInt16LE(0) !== 1234) {
+  throw new Error("PTT active frame did not contain microphone audio");
+}
+"""
+    )
+
+
 def test_voice_bubble_reaper_reschedules_shortened_deadline():
     _run_node(
         """

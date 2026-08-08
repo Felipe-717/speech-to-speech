@@ -2687,6 +2687,114 @@ body.cam-on .footer {
   .ident-title { font-size: 24px; }
 }
 
+/* -------------------------------------------------------------------------
+ * Voicebot demo skin
+ * The upstream selectors remain the source of truth for behavior. These
+ * overrides restore the warm, workshop-like visual language without changing
+ * the orb state machine or transcript DOM contract.
+ * ------------------------------------------------------------------------- */
+:root {
+  --bg: #f7f1e8;
+  --bg-elev: #fffaf2;
+  --bg-elev-2: #efe3d5;
+  --border: rgba(77, 55, 40, 0.14);
+  --border-strong: rgba(77, 55, 40, 0.26);
+  --text: #382b25;
+  --text-dim: rgba(56, 43, 37, 0.7);
+  --text-faint: rgba(56, 43, 37, 0.48);
+  --accent: #e56b42;
+  --accent-2: #3d9b91;
+  --listening: #3d9b91;
+  --speaking: #d94f74;
+  --processing: #d58a35;
+  --error: #be4c42;
+  --success: #3d9b91;
+  --shadow-soft: 0 18px 55px rgba(91, 61, 42, 0.16);
+  color-scheme: light;
+}
+
+body {
+  background:
+    radial-gradient(circle at 12% 8%, rgba(229, 107, 66, 0.13), transparent 28rem),
+    radial-gradient(circle at 90% 78%, rgba(61, 155, 145, 0.11), transparent 30rem),
+    var(--bg);
+}
+
+.topbar {
+  padding: 24px clamp(22px, 5vw, 72px);
+}
+.ident-title { color: var(--text); font-family: Georgia, "Times New Roman", serif; font-size: 24px; letter-spacing: -0.02em; }
+.ident-blurb { color: var(--text-dim); max-width: 42ch; }
+.ident-meta, .footer { color: var(--text-faint); }
+.topbar-right .icon-btn, .icon-btn {
+  color: var(--text-dim);
+  background: rgba(255, 250, 242, 0.72);
+  border-color: var(--border);
+  box-shadow: 0 4px 14px rgba(91, 61, 42, 0.07);
+}
+.topbar-right .icon-btn:hover, .icon-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+.stage { gap: 14px; padding-top: 8px; }
+.orb-wrap { gap: clamp(14px, 2vw, 26px); }
+.circle { width: clamp(170px, min(42vw, 48vh), 350px); }
+.circle-core {
+  background: radial-gradient(circle at 35% 25%, #fffdf8 0%, #f4d8c7 48%, #e9a17e 100%);
+  border: 2px solid color-mix(in srgb, var(--glow, var(--accent)) 58%, #fff);
+  box-shadow: 0 14px 45px color-mix(in srgb, var(--glow, var(--accent)) 24%, transparent), inset 0 0 35px rgba(255, 255, 255, 0.8);
+}
+.circle-glow { opacity: 0.32; filter: blur(34px); }
+.circle-ring { border-color: color-mix(in srgb, var(--glow, var(--accent)) 42%, transparent); }
+.circle-ring-outer { border-color: color-mix(in srgb, var(--glow, var(--accent)) 28%, transparent); }
+.circle-caption { color: var(--text-faint); }
+.circle-subcaption, .mode-hint { color: var(--text-dim); }
+
+.input-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255, 250, 242, 0.82);
+  box-shadow: 0 8px 24px rgba(91, 61, 42, 0.08);
+}
+.mode-button {
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 15px;
+  background: transparent;
+  color: var(--text-faint);
+  font: 600 11px/1 var(--font-mono);
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease, transform 0.12s ease;
+}
+.mode-button[aria-pressed="true"], .mode-button.active {
+  background: var(--accent);
+  color: #fffaf2;
+}
+.mode-button:active { transform: scale(0.97); }
+.mode-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mode-hint { margin: 0; min-height: 1.3em; font-size: 12px; text-align: center; }
+.mode-ptt .circle.ptt-active { filter: saturate(1.2) brightness(1.08); }
+
+.bubble { background: rgba(255, 250, 242, 0.95); border-color: var(--border); box-shadow: var(--shadow-soft); color: var(--text); }
+.chat-panel-inner { background: var(--bg-elev); border-color: var(--border); box-shadow: -14px 0 40px rgba(91, 61, 42, 0.14); }
+.chat-panel-backdrop { background: rgba(91, 61, 42, 0.2); }
+.modal-content { background: var(--bg-elev); border-color: var(--border-strong); box-shadow: var(--shadow-soft); }
+.field input, .field select, .field textarea { background: #fffdf8; color: var(--text); border-color: var(--border-strong); }
+.voice-clone-label { color: var(--accent-2); font-family: var(--font-mono); letter-spacing: 0.03em; }
+#voice { display: none; }
+#tools-btn, #tools-modal, #cam-pip, #transport-field { display: none !important; }
+.about-pipeline { display: none; }
+
+@media (max-width: 600px) {
+  .topbar { padding: 16px 18px; }
+  .ident-title { font-size: 20px; }
+  .input-mode { max-width: calc(100vw - 32px); }
+  .mode-button { padding-inline: 10px; font-size: 10px; }
+}
+
 /* ─── Short viewports: fit without a vertical scrollbar ─────────────────────
  * The base media queries only react to WIDTH, so a short container (e.g. the
  * app embedded in a small box, or a laptop window once the browser chrome eats

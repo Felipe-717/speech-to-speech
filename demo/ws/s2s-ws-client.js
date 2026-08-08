@@ -67,6 +67,8 @@
  *   executes and replies via `sendToolOutput` + `requestResponse`.
  * @property {NoiseGate} [noiseGate] Client-side noise gate applied to the mic
  *   before it's sent. Tunable live via `setNoiseGate`.
+ * @property {InputMode} [inputMode] `live` continuously forwards speech;
+ *   `ptt` forwards speech only while `setPushToTalk(true)` is active.
  * @property {string} [audioOutputId] MediaDeviceInfo.deviceId for speakers.
  *   Applied via AudioContext.setSinkId when the browser supports it.
  *
@@ -79,6 +81,8 @@
  * @property {string} name
  * @property {string} description
  * @property {object} parameters JSON Schema for the call arguments.
+ *
+ * @typedef {"live" | "ptt"} InputMode
  *
  * @typedef {Object} TranscriptEvent
  * @property {"user" | "assistant"} role
@@ -186,6 +190,11 @@ export class S2sWsRealtimeClient extends EventTarget {
      * with legacy endpoints that emitted a done event for every text segment. */
     this._asstFullByResp = new Map();
     this._muted = false;
+    /** @type {InputMode} */
+    this._inputMode = options.inputMode === "ptt" ? "ptt" : "live";
+    // Keep emitting fixed-size frames in both modes. PTT starts closed and
+    // sends silence until the UI explicitly opens the talk gate.
+    this._pushToTalkActive = this._inputMode === "live";
     // ── Response lock ────────────────────────────────────────────────────
     // The backend allows only ONE response in flight: creating a second while
     // one is active fails with `conversation_already_has_active_response`. So
@@ -621,12 +630,16 @@ export class S2sWsRealtimeClient extends EventTarget {
   _onMicChunk(pcm16Buffer) {
     if (!this._ws || this._ws.readyState !== WebSocket.OPEN) return;
     if (!this._sessionConfigured) return; // Server rejects audio before session.update.
-    if (this._muted) return;
-    const b64 = base64FromArrayBuffer(pcm16Buffer);
+    const sendingSpeech = !this._muted &&
+      (this._inputMode === "live" || this._pushToTalkActive);
+    // Silence keeps the backend VAD clock alive when muted or when PTT is
+    // released, allowing the normal speech_stopped path to close the turn.
+    const payload = sendingSpeech ? pcm16Buffer : new ArrayBuffer(pcm16Buffer.byteLength);
+    const b64 = base64FromArrayBuffer(payload);
     this._send({ type: "input_audio_buffer.append", audio: b64 });
     // Record only after the append is accepted for sending. This intentionally
     // excludes pre-configuration and muted audio, just like the backend input.
-    this._userAudioRecorder.append(pcm16Buffer);
+    if (sendingSpeech) this._userAudioRecorder.append(pcm16Buffer);
   }
 
   /**
@@ -1108,6 +1121,22 @@ export class S2sWsRealtimeClient extends EventTarget {
   /** @param {boolean} muted */
   setMuted(muted) {
     this._muted = muted;
+  }
+
+  /** @returns {InputMode} */
+  get inputMode() {
+    return this._inputMode;
+  }
+
+  /** @param {InputMode} mode */
+  setInputMode(mode) {
+    this._inputMode = mode === "ptt" ? "ptt" : "live";
+    this._pushToTalkActive = this._inputMode === "live";
+  }
+
+  /** @param {boolean} active */
+  setPushToTalk(active) {
+    this._pushToTalkActive = !!active;
   }
 
   /**

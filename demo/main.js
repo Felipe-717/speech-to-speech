@@ -24,6 +24,10 @@ import { ChatView } from "./ui/chat.js";
 import { Account } from "./ui/account.js";
 
 const DEFAULT_VOICE = "Aiden";
+// This deployment is intentionally voice-only while the warm UI is being
+// reintegrated. Keep the upstream DOM contract, but do not expose transports,
+// tools, text, or camera controls that are not part of the validated demo.
+const VOICE_ONLY_DEMO = true;
 const DEFAULT_INSTRUCTIONS =
   "You are a friendly voice assistant. " +
   "Keep replies short, warm, and spoken. Avoid long monologues.";
@@ -51,6 +55,7 @@ const STORAGE_KEYS = {
   transport: "s2s.transport",
   audioInputId: "s2s.audio.inputId",
   audioOutputId: "s2s.audio.outputId",
+  inputMode: "s2s.input.mode",
 };
 
 // ── Noise gate ──────────────────────────────────────────────────────────────
@@ -128,6 +133,7 @@ function loadSettings() {
     transport: localStorage.getItem(STORAGE_KEYS.transport) === "webrtc" ? "webrtc" : "ws",
     audioInputId: localStorage.getItem(STORAGE_KEYS.audioInputId) || "",
     audioOutputId: localStorage.getItem(STORAGE_KEYS.audioOutputId) || "",
+    inputMode: localStorage.getItem(STORAGE_KEYS.inputMode) === "ptt" ? "ptt" : "live",
   };
 }
 
@@ -153,10 +159,12 @@ function saveSettings(s) {
   localStorage.setItem(STORAGE_KEYS.transport, s.transport);
   localStorage.setItem(STORAGE_KEYS.audioInputId, s.audioInputId || "");
   localStorage.setItem(STORAGE_KEYS.audioOutputId, s.audioOutputId || "");
+  localStorage.setItem(STORAGE_KEYS.inputMode, s.inputMode || "live");
 }
 
 /** @returns {{ web_search: boolean, camera_snapshot: boolean }} */
 function loadTools() {
+  if (VOICE_ONLY_DEMO) return { web_search: false, camera_snapshot: false };
   try {
     const raw = JSON.parse(localStorage.getItem(STORAGE_KEYS.tools) || "{}");
     // Both tools default ON (web search still only activates when a key exists).
@@ -211,6 +219,12 @@ const circleBtn = $("#main-circle");
 const circleCaption = $("#circle-caption");
 /** @type {HTMLParagraphElement} */
 const circleSubcaption = $("#circle-subcaption");
+/** @type {HTMLButtonElement} */
+const modeLiveBtn = $("#mode-live");
+/** @type {HTMLButtonElement} */
+const modePttBtn = $("#mode-ptt");
+/** @type {HTMLElement} */
+const modeHint = $("#mode-hint");
 /** @type {HTMLElement} */
 const orbWrap = $(".orb-wrap");
 /** @type {HTMLButtonElement} */
@@ -404,6 +418,9 @@ let client = null;
 /** @type {MediaStream | null} */
 let micStream = null;
 let micMuted = false;
+/** @type {"live" | "ptt"} */
+let inputMode = settings.inputMode;
+let pttActive = false;
 
 /** Apply both the user's mute choice and the temporary replay guard. */
 function syncMicMuteState() {
@@ -412,6 +429,34 @@ function syncMicMuteState() {
     track.enabled = !muted;
   }
   client?.setMuted(muted);
+}
+
+function syncInputModeUi() {
+  const ptt = inputMode === "ptt";
+  modeLiveBtn.setAttribute("aria-pressed", String(!ptt));
+  modePttBtn.setAttribute("aria-pressed", String(ptt));
+  modeHint.textContent = ptt
+    ? "Mantén pulsado el orb o la barra espaciadora para hablar."
+    : "Habla normalmente; el sistema detecta cuándo terminas.";
+  document.body.classList.toggle("mode-ptt", ptt);
+  if (client?.setInputMode) client.setInputMode(inputMode);
+  if (client?.setPushToTalk) client.setPushToTalk(!ptt || pttActive);
+}
+
+function setInputMode(mode) {
+  inputMode = mode === "ptt" ? "ptt" : "live";
+  pttActive = inputMode === "live";
+  localStorage.setItem(STORAGE_KEYS.inputMode, inputMode);
+  syncInputModeUi();
+}
+
+function setPttActive(active) {
+  if (inputMode !== "ptt" || !LIVE_STATES.has(currentState)) return;
+  pttActive = !!active;
+  client?.setPushToTalk(pttActive);
+  modePttBtn.classList.toggle("active", pttActive);
+  circleBtn.classList.toggle("ptt-active", pttActive);
+  if (pttActive) setCaption("Escuchando", "muted");
 }
 
 /** @param {AppState} next */
@@ -423,6 +468,12 @@ function setState(next) {
   if (next !== "error") setCaption(view.caption);
 
   const live = LIVE_STATES.has(next);
+  if (!live) {
+    pttActive = inputMode === "live";
+    client?.setPushToTalk?.(pttActive);
+    modePttBtn.classList.remove("active");
+    circleBtn.classList.remove("ptt-active");
+  }
   orbWrap.classList.toggle("live", live);
   micBtn.setAttribute("aria-hidden", live ? "false" : "true");
   stopBtn.setAttribute("aria-hidden", live ? "false" : "true");
@@ -627,6 +678,11 @@ aboutModal.addEventListener("click", (e) => {
 
 /** Reflect the current tool state into the panel controls. */
 function syncToolsUi() {
+  if (VOICE_ONLY_DEMO) {
+    toolsBtn.hidden = true;
+    toolsModal.hidden = true;
+    return;
+  }
   const avail = searchAvailable();
   toolWebSwitch.checked = toolsEnabled.web_search && avail;
   toolWebSwitch.disabled = !avail;
@@ -1029,6 +1085,7 @@ function readSettingsFromForm() {
         ? (inputTransport.value === "webrtc" ? "webrtc" : "ws")
         : settings.transport
     ),
+    inputMode,
     audioInputId: inputAudioInput.value || "",
     audioOutputId: inputAudioOutput.value || "",
   };
@@ -1050,6 +1107,7 @@ function transportSelectable() {
 
 /** The transport the next conversation will actually use. */
 function effectiveTransport() {
+  if (VOICE_ONLY_DEMO) return "ws";
   return transportSelectable() && settings.transport === "webrtc" ? "webrtc" : "ws";
 }
 
@@ -1057,6 +1115,13 @@ function effectiveTransport() {
  *  noise gate when WebRTC is picked (the gate lives in the WS capture
  *  worklet; the WebRTC mic path sends the raw track). */
 function syncTransportUi() {
+  if (VOICE_ONLY_DEMO) {
+    transportField.hidden = true;
+    inputTransport.value = "ws";
+    inputTransport.disabled = true;
+    gateField.hidden = false;
+    return;
+  }
   // Hidden in LB mode (nothing to choose); visible-but-locked in un-pinned
   // direct mode so the option is discoverable along with what unlocks it.
   transportField.hidden = !allowDirect;
@@ -1213,16 +1278,52 @@ async function handleStartError(err) {
   await onFatalError(err);
 }
 
+modeLiveBtn.addEventListener("click", () => setInputMode("live"));
+modePttBtn.addEventListener("click", () => setInputMode("ptt"));
+
+// PTT is deliberately layered on top of the already-connected upstream orb:
+// the first click starts the session, then a subsequent press-and-hold opens
+// the audio gate. Pointer cancellation and focus loss always close it.
+circleBtn.addEventListener("pointerdown", (event) => {
+  if (inputMode === "ptt" && LIVE_STATES.has(currentState)) {
+    event.preventDefault();
+    circleBtn.setPointerCapture?.(event.pointerId);
+    setPttActive(true);
+  }
+});
+for (const type of ["pointerup", "pointercancel", "pointerleave"]) {
+  circleBtn.addEventListener(type, () => setPttActive(false));
+}
+window.addEventListener("blur", () => setPttActive(false));
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) setPttActive(false);
+});
+document.addEventListener("keydown", (event) => {
+  if (event.code === "Space" && inputMode === "ptt" && !event.repeat &&
+      document.activeElement !== inputInstructions) {
+    event.preventDefault();
+    setPttActive(true);
+  }
+});
+document.addEventListener("keyup", (event) => {
+  if (event.code === "Space" && inputMode === "ptt") {
+    event.preventDefault();
+    setPttActive(false);
+  }
+});
+
 micBtn.addEventListener("click", () => {
   if (!micStream || !client) return;
   micMuted = !micMuted;
   syncMicMuteState();
+  if (micMuted) setPttActive(false);
   micBtn.classList.toggle("muted", micMuted);
   micBtn.setAttribute("aria-label", micMuted ? "Unmute" : "Mute");
   micBtn.title = micMuted ? "Unmute" : "Mute";
 });
 
 stopBtn.addEventListener("click", async () => {
+  setPttActive(false);
   await teardown();
 });
 
@@ -1404,7 +1505,7 @@ function stopJoinCountdown() {
  * @param {AudioContext | null} [audioContext]
  */
 async function doStart(audioContext = null) {
-  const transport = effectiveTransport();
+  const transport = "ws";
   // Resolve the target before touching mic/audio so a misconfiguration (e.g.
   // direct mode with no URL) fails fast with a clear message. Over WebRTC the
   // browser never dials the s2s server itself — the offer goes to the
@@ -1437,15 +1538,13 @@ async function doStart(audioContext = null) {
     throw err;
   }
 
-  // The webcam is started on arrival (autoStartCamera), so nothing to do here;
-  // a still-pending grant just means the snapshot tool isn't ready yet.
-
   const common = {
     voice: settings.voice,
     instructions: effectiveInstructions(),
     startupGreeting,
     acquireMic: acquireMicStream,
-    tools: activeToolDefs(),
+    tools: VOICE_ONLY_DEMO ? [] : activeToolDefs(),
+    inputMode,
     audioOutputId: settings.audioOutputId || "",
     ...(audioContext ? { audioContext } : {}),
   };
@@ -1461,7 +1560,9 @@ async function doStart(audioContext = null) {
         ...common,
       });
   client = c;
+  c.setInputMode?.(inputMode);
   c.setMuted(micMuted || userAudioReplaying);
+  c.setPushToTalk?.(inputMode === "live" || pttActive);
 
   c.addEventListener("queue", (e) => {
     const { position, queueId } = /** @type {CustomEvent<{ position: number; queueId: string }>} */ (e).detail;
@@ -1690,6 +1791,7 @@ async function teardown() {
   }
   // The webcam is independent of the call lifecycle (it runs while the user is
   // on the page), so we leave it on here — only the camera toggle stops it.
+  disableCamera();
   micMuted = false;
   micBtn.classList.remove("muted");
   document.body.classList.remove("rtc-live");
@@ -1713,13 +1815,11 @@ async function onFatalError(err) {
 }
 
 setState("idle");
+syncInputModeUi();
 chat.renderEmptyState();
 initGateArc();
 void fetchConfig();
-// Start the webcam as soon as the user lands (camera tool defaults on), and
-// react to later permission changes (re-grant after a denial re-enables it).
-void autoStartCamera();
-void watchCameraPermission();
+// Voice-only demo: never request camera permission during page load.
 
 // Reconcile a live session if the tab is closed/hidden mid-call (no teardown).
 window.addEventListener("pagehide", () => { endTrackedSession(); endQueueTicket(); });
