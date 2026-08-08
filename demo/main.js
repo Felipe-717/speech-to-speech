@@ -39,10 +39,12 @@ const LEGACY_ENGLISH_INSTRUCTIONS =
 // idling for the next turn — it should act immediately in the same response.
 const TOOL_USE_HINT =
   " When the user's request calls for one of your tools, do not describe your " +
-  "capabilities or say you can do it and wait for another turn. Instead, say " +
-  'a brief acknowledgement like "Let me search for that..." and call the tool ' +
-  "right away in the same response. Para tareas largas usa start_background_task; " +
-  "para documentos usa knowledge_search; para el progreso usa get_task_status.";
+  "capabilities or promise a search and wait for another turn. Call the tool " +
+  "in the same response before making any claim about its result. Never say " +
+  "that you are searching, reading documents, or creating a task unless you " +
+  "actually call the corresponding tool. Para tareas largas usa " +
+  "start_background_task; para documentos usa knowledge_search; para el " +
+  "progreso usa get_task_status.";
 
 function stripInternalModelText(text) {
   return String(text || "")
