@@ -237,13 +237,14 @@ export class ChatView {
     const visible = /** @type {HTMLElement[]} */ ([...this._bubbleStack.querySelectorAll(".bubble:not(.out)")]);
     let nextWake = Infinity;
     for (const el of visible) {
-      const exp = this._bubbleExpiry.get(el) ?? now; // no expiry recorded → treat as due
+      const exp = this._bubbleExpiry.get(el);
+      // Transcript bubbles intentionally have no expiry. They are retained
+      // until the per-speaker cap evicts the oldest one.
+      if (exp == null) continue;
       if (exp <= now) {
         this._dismissBubble(el);
       } else {
-        // Oldest survivor isn't due yet; stop so nothing newer leaves before it.
-        nextWake = exp;
-        break;
+        nextWake = Math.min(nextWake, exp);
       }
     }
     if (nextWake !== Infinity) {
@@ -259,11 +260,12 @@ export class ChatView {
   _scheduleBubbleReaper() {
     if (this._reaperHandle) clearTimeout(this._reaperHandle);
     this._reaperHandle = 0;
-    const oldest = /** @type {HTMLElement | null} */ (
-      this._bubbleStack.querySelector(".bubble:not(.out)")
-    );
-    if (!oldest) return;
-    const expiry = this._bubbleExpiry.get(oldest) ?? Date.now();
+    const visible = /** @type {HTMLElement[]} */ ([...this._bubbleStack.querySelectorAll(".bubble:not(.out)")]);
+    const expiries = visible
+      .map((el) => this._bubbleExpiry.get(el))
+      .filter((expiry) => expiry != null);
+    if (!expiries.length) return;
+    const expiry = Math.min(...expiries);
     this._reaperHandle = setTimeout(
       () => this._reapBubbles(),
       Math.max(50, expiry - Date.now()),
