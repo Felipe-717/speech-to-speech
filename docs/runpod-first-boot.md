@@ -148,6 +148,7 @@ speech-to-speech serve \
   --qwen3_tts_device cuda \
   --qwen3_tts_backend ggml \
   --qwen3_tts_speaker Serena \
+  --qwen3_tts_language spanish \
   --model_name gemma-4-12B-it-qat-GGUF \
   --responses_api_base_url http://127.0.0.1:8000/v1 \
   --responses_api_api_key local \
