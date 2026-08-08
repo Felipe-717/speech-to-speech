@@ -6,7 +6,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-BRANCH="${S2S_BRANCH:-front-upstream-integration}"
+BRANCH="${S2S_BRANCH:-main}"
 VOICE_DIR="${VOICE_DIR:-/workspace/voices}"
 
 cd "$REPO_DIR"

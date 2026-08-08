@@ -48,7 +48,7 @@ Esperamos Python 3.12.x, PyTorch 2.8.0+cu128 (o equivalente CUDA 12.8), CUDA dis
 
 ~~~bash
 cd /workspace
-git clone -b front-upstream-integration https://github.com/Felipe-717/speech-to-speech.git
+git clone -b main https://github.com/Felipe-717/speech-to-speech.git
 cd /workspace/speech-to-speech
 ~~~
 
@@ -267,7 +267,7 @@ Para evitar límites de pegado del Web Terminal, después de actualizar el repo 
 puede ejecutar el lanzador completo:
 
 ~~~bash
-git pull --ff-only origin front-upstream-integration
+git pull --ff-only origin main
 bash scripts/runpod-pipeline.sh
 ~~~
 
@@ -375,7 +375,7 @@ git status
 git log -1 --oneline
 ~~~
 
-El código de esta demo se conserva en la rama `front-upstream-integration` del fork;
+El código de esta demo se conserva en la rama `main` del fork;
 el entorno, modelos y cachés locales no.
 
 ## Errores comunes
