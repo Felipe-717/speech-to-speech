@@ -152,10 +152,12 @@ export class ChatView {
       el = this._buildMessageEl({ container: "bubble", prefix: "bubble", role, text });
     }
     this._bubbleStack.appendChild(el);
-    // Cap the stack at 3, but never evict the bubble the caller is still
-    // actively updating (the live user bubble) — drop the next-oldest instead.
-    const visible = /** @type {HTMLElement[]} */ ([...this._bubbleStack.querySelectorAll(".bubble:not(.out)")]);
-    if (visible.length > 3) {
+    // Keep the last four turns for each speaker visible around the orb. The
+    // original Voicebot surface treats these as a compact conversation strip,
+    // not toast notifications that vanish while the user is reading them.
+    const roleSelector = role === "tool" ? ".bubble.tool:not(.out)" : `.bubble.${role}:not(.out)`;
+    const visible = /** @type {HTMLElement[]} */ ([...this._bubbleStack.querySelectorAll(roleSelector)]);
+    if (visible.length > 4) {
       this._dismissBubble(visible.find((b) => b !== this._activeUserBubble) ?? visible[0]);
     }
     requestAnimationFrame(() => el.classList.add("in"));
@@ -276,6 +278,15 @@ export class ChatView {
    * @param {HTMLElement} el @param {number} [delay]
    */
   _bumpDismiss(el, delay = 4000) {
+    // Normal transcript bubbles are the visible conversation history. Keep
+    // them until the per-speaker cap evicts the oldest one. Voice placeholders
+    // ("Listening…" / "Sending voice…") remain temporary and still use the
+    // fail-safe timers below.
+    if (!el.classList.contains("voice") && !el.classList.contains("tool")) {
+      this._bubbleExpiry.delete(el);
+      this._scheduleBubbleReaper();
+      return;
+    }
     this._bubbleExpiry.set(el, Date.now() + delay);
     this._scheduleBubbleReaper();
   }
