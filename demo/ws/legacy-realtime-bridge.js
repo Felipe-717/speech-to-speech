@@ -30,9 +30,16 @@ function base64ToBytes(value) {
 }
 
 function resamplePcm48To16(input) {
+  // The AudioWorklet posts an ArrayBuffer, while callers may also provide a
+  // typed-array view. Handle both explicitly; treating an ArrayBuffer like a
+  // view leaves the source empty in some browsers.
   const source = input instanceof Int16Array
     ? input
-    : new Int16Array(input.buffer, input.byteOffset, Math.floor(input.byteLength / 2));
+    : input instanceof ArrayBuffer
+      ? new Int16Array(input)
+      : ArrayBuffer.isView(input)
+        ? new Int16Array(input.buffer, input.byteOffset, Math.floor(input.byteLength / 2))
+        : new Int16Array(0);
   const length = Math.floor(source.length / 3);
   const output = new Int16Array(length);
   for (let i = 0; i < length; i += 1) {
@@ -145,10 +152,7 @@ export class VoicebotRealtimeSocket {
       return;
     }
     if (data instanceof ArrayBuffer || ArrayBuffer.isView(data)) {
-      const bytes = data instanceof ArrayBuffer
-        ? new Uint8Array(data)
-        : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-      const pcm = resamplePcm48To16(bytes);
+      const pcm = resamplePcm48To16(data);
       this._sendRealtime({ type: "input_audio_buffer.append", audio: bytesToBase64(pcm) });
     }
   }
