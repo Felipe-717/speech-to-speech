@@ -63,19 +63,26 @@ Debe aparecer .venv/bin/python, pero torch debe continuar en /usr/local/lib/pyth
 
 ## 5. Instalar dependencias dentro del venv
 
-Usar siempre el Python del venv. No usar --system:
+Usar `pip` a traves del Python del venv. En esta imagen `pip` reconoce `torch`
+y `torchaudio` instalados globalmente y los deja intactos. No usar `uv pip install`
+para este paso: su resolvedor puede intentar descargar otra copia de PyTorch.
 
 ~~~bash
-uv pip install --python .venv/bin/python -e .
-uv pip install --python .venv/bin/python -r demo/requirements.txt
+python -m pip install --dry-run -e .
+python -m pip install -e .
+python -m pip install -r demo/requirements.txt
 ~~~
+
+En el `dry-run` deben aparecer `Requirement already satisfied` para torch y
+torchaudio con version `2.8.0+cu128`. Si propone descargar otra version de
+torch, detener con Ctrl+C.
 
 Durante la instalación, si aparece una descarga grande de torch, detener con Ctrl+C: se estaría creando una segunda copia. Después verificar:
 
 ~~~bash
 source .venv/bin/activate
 python -c "import torch; print(torch.__version__); print(torch.__file__); print(torch.cuda.is_available())"
-uv pip check
+python -m pip check
 speech-to-speech --help | head -n 20
 ~~~
 
