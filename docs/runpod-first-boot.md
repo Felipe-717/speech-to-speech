@@ -249,7 +249,7 @@ existe `.spk`, usar únicamente ese archivo:
 ~~~bash
 cd /workspace/speech-to-speech/demo
 source ../.venv/bin/activate
-unset SPEECH_TO_SPEECH_INTERNAL_URL
+unset LOAD_BALANCER_URL SPEECH_TO_SPEECH_INTERNAL_URL
 export SPEECH_TO_SPEECH_URL=ws://127.0.0.1:8765/v1/realtime
 uvicorn server:app --host 0.0.0.0 --port 7860
 ~~~
