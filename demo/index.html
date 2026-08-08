@@ -547,7 +547,7 @@ const ui = {
   form: el('formulario'), texto: el('texto'),
 };
 
-let ws, ctx, salida, micStream, nodoMic, worklet, promesaConexion = null;
+  let ws, ctx, salida, micStream, nodoMic, worklet, micSink, promesaConexion = null;
 let modo = 'pulsar', grabando = false, enLlamada = false, silenciado = false;
 let esperandoAudio = null, siguiente = 0, nivelActual = 0;
 // PICO_MINIMO evita que el silencio de una sala muy callada se amplifique hasta
@@ -757,9 +757,20 @@ class Captura extends AudioWorkletProcessor {
 registerProcessor('captura', Captura);
 `;
 
-function pararAudio() {
-  siguiente = 0;
-  if (salida) { salida.close(); salida = null; }
+  function pararAudio() {
+    siguiente = 0;
+    if (salida) { salida.close(); salida = null; }
+  }
+
+  function cerrarMicrofono() {
+    if (nodoMic) { try { nodoMic.disconnect(); } catch {} nodoMic = null; }
+    if (worklet) { try { worklet.disconnect(); } catch {} worklet = null; }
+    if (micSink) { try { micSink.disconnect(); } catch {} micSink = null; }
+    if (micStream) {
+      micStream.getTracks().forEach(track => track.stop());
+      micStream = null;
+    }
+    if (ctx) { ctx.close().catch(() => {}); ctx = null; }
 }
 
 function reproducirPCM(buffer, sampleRate) {
@@ -845,6 +856,12 @@ async function abrirMicrofono() {
     if (enviar && ws && ws.readyState === WebSocket.OPEN) { ws.send(data.pcm); ultimoEnvio = Date.now(); }
   };
   nodoMic.connect(worklet);
+  // AudioWorkletNode needs to be part of an active audio graph for some
+  // browsers to call process(). Route its (silent) output through a zero-gain
+  // sink so the microphone is processed without ever feeding back to speakers.
+  micSink = ctx.createGain();
+  micSink.gain.value = 0;
+  worklet.connect(micSink).connect(ctx.destination);
   await asegurarSonando();
 }
 
@@ -993,6 +1010,7 @@ function terminarLlamada() {
   ui.crono.classList.remove('visible');
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'fin_de_turno' }));
   pararAudio();
+  cerrarMicrofono();
   pintarControles();
 }
 
