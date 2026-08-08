@@ -211,6 +211,19 @@ curl http://127.0.0.1:8000/v1/chat/completions \
 
 ### Terminal 2: pipeline de voz (primera ejecución, crea la cache)
 
+Para evitar límites de pegado del Web Terminal, después de actualizar el repo se
+puede ejecutar el lanzador completo:
+
+~~~bash
+git pull --ff-only origin demo-foundation
+bash scripts/runpod-pipeline.sh
+~~~
+
+El script comprueba que Gemma responda en el puerto 8000 y que exista el WAV
+normalizado antes de iniciar el pipeline.
+
+La forma manual equivalente es:
+
 ~~~bash
 cd /workspace/speech-to-speech
 source .venv/bin/activate
