@@ -78,6 +78,63 @@ git clone -b main https://github.com/Felipe-717/speech-to-speech.git
 cd /workspace/speech-to-speech
 ```
 
+### Inicio completo de la rama experimental
+
+Para probar texto, RAG, inventario de documentos, búsqueda web y tareas en
+segundo plano, puedes ejecutar este bloque completo después de conectarte por
+SSH. La caché de voz validada ya está dentro del repositorio; no hace falta
+subir el WAV para esta prueba.
+
+```bash
+set -euo pipefail
+
+cd /workspace
+
+if [ ! -d /workspace/speech-to-speech/.git ]; then
+  git clone -b feature/agent-rag-web https://github.com/Felipe-717/speech-to-speech.git
+fi
+
+cd /workspace/speech-to-speech
+git fetch origin feature/agent-rag-web
+git checkout feature/agent-rag-web
+git pull --ff-only origin feature/agent-rag-web
+
+bash scripts/runpod-01-setup.sh
+
+tmux new-session -d -s voicebot -n llama \
+  "cd /workspace/speech-to-speech && bash scripts/runpod-02-llm.sh"
+
+echo "Esperando a que Gemma esté disponible..."
+until curl -fsS http://127.0.0.1:8000/health >/dev/null 2>&1; do
+  sleep 2
+done
+
+tmux new-window -t voicebot -n pipeline \
+  "cd /workspace/speech-to-speech && bash scripts/runpod-03-pipeline.sh"
+
+tmux new-window -t voicebot -n frontend \
+  "cd /workspace/speech-to-speech && bash scripts/runpod-04-frontend.sh"
+
+tmux new-window -t voicebot -n checks \
+  "cd /workspace/speech-to-speech && bash"
+
+tmux attach -t voicebot
+```
+
+En la ventana `checks` puedes comprobar el estado con:
+
+```bash
+curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:7860/health
+python -m demo.rag status
+find /workspace/voices/cache -maxdepth 1 -type f -printf '%f\n'
+```
+
+Después crea el túnel SSH de la sección siguiente y abre
+`http://localhost:7860`. Si ya tienes PDFs en `/workspace/knowledge`, el índice
+RAG y los documentos se conservan; no tienes que volver a cargarlos mientras el
+volumen persistente de `/workspace` siga montado.
+
 ### 4. Copiar la referencia de voz
 
 Desde la sesión SSH del Pod:
