@@ -121,12 +121,20 @@ Crear el directorio destino desde la sesión SSH del Pod:
 mkdir -p /workspace/voices
 ~~~
 
-Después, copiar el WAV desde PowerShell local al Pod:
+Después, copiar el WAV desde PowerShell local al Pod. Sustituye `PUERTO_SSH`
+e `IP_DEL_POD` por los valores reales que aparecen en RunPod en
+`Connect → SSH`; no ejecutes esos textos literalmente:
 
 ~~~powershell
 scp -P PUERTO_SSH -i C:\Users\felip\.ssh\id_ed25519 `
   "C:\Users\felip\Documents\Voicebot\data\voices\voz_referencia.wav" `
 root@IP_DEL_POD:/workspace/voices/voz_referencia.wav
+~~~
+
+Comprueba que la copia terminó antes de normalizarla:
+
+~~~bash
+ls -lh /workspace/voices/voz_referencia.wav
 ~~~
 
 En el Pod, crear una copia mono PCM16/24 kHz normalizada. El original no se
