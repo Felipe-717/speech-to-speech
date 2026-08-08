@@ -3038,7 +3038,8 @@ body.voice-only-demo .bubble-stack, .bubble-stack {
  * presentation layer that matches the handoff-front layout. */
 .bubble-stack {
   position: fixed;
-  top: 132px;
+  /* Keep the conversation below the fixed system/pipeline cards. */
+  top: clamp(280px, 32vh, 330px);
   right: clamp(22px, 4vw, 58px);
   bottom: 116px;
   left: clamp(22px, 4vw, 58px);
@@ -3051,8 +3052,8 @@ body.voice-only-demo .bubble-stack, .bubble-stack {
   gap: 10px;
   pointer-events: none;
   overflow: hidden;
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0, rgba(0,0,0,.55) 12%, #000 26%);
-  mask-image: linear-gradient(to bottom, transparent 0, rgba(0,0,0,.55) 12%, #000 26%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, rgba(0,0,0,.35) 8%, #000 20%);
+  mask-image: linear-gradient(to bottom, transparent 0, rgba(0,0,0,.35) 8%, #000 20%);
 }
 .bubble-stack .bubble {
   width: min(330px, 100%);
@@ -3075,7 +3076,7 @@ body.voice-only-demo .bubble-stack, .bubble-stack {
 
 @media (max-width: 760px) {
   .bubble-stack {
-    top: 108px;
+    top: 220px;
     left: 16px;
     right: 16px;
     bottom: 90px;

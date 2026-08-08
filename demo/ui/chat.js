@@ -156,7 +156,7 @@ export class ChatView {
     // surface is a chat, not two independent columns: one message occupies
     // each row and older rows leave through the top as the stream grows.
     const visible = /** @type {HTMLElement[]} */ ([...this._bubbleStack.querySelectorAll(".bubble:not(.out)")]);
-    if (visible.length > 8) {
+    if (visible.length > 6) {
       this._dismissBubble(visible.find((b) => b !== this._activeUserBubble) ?? visible[0]);
     }
     requestAnimationFrame(() => el.classList.add("in"));
