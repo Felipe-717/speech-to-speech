@@ -166,6 +166,25 @@ class SearchRequest(BaseModel):
     key: str | None = None
 
 
+@app.get("/health")
+def health():
+    """Small same-origin status payload consumed by the reused Voicebot UI.
+
+    Retrieval is intentionally not part of this first vertical slice. Keeping
+    the fields stable lets the frontend show the active pipeline without
+    pretending that a document index is already configured.
+    """
+    return {
+        "componentes": [],
+        "chunks_indexados": 0,
+        "modelo": os.environ.get("LLM_MODEL", "Realtime S2S pipeline"),
+        "voz": os.environ.get("TTS_VOICE", "Serena"),
+        "voz_en_vivo": True,
+        "modo_local": False,
+        "modo_entrada": "pulsar",
+    }
+
+
 @app.get("/api/config")
 def config():
     """Client bootstrap: whether web search is available, whether the deploy runs
