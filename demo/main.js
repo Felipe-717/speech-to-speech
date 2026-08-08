@@ -237,6 +237,11 @@ const queueActions = $("#queue-actions");
 const joinQueueBtn = $("#join-queue-btn");
 /** @type {HTMLButtonElement} */
 const leaveQueueBtn = $("#leave-queue-btn");
+// Decorative status labels used by the original warm layout. They mirror the
+// upstream state machine but never participate in transport or audio logic.
+const legacyPoint = /** @type {HTMLElement | null} */ (document.querySelector("#punto"));
+const legacyConnection = /** @type {HTMLElement | null} */ (document.querySelector("#conexion"));
+const legacySystemTitle = /** @type {HTMLElement | null} */ (document.querySelector("#sistemaTitulo"));
 
 /** @type {HTMLButtonElement} */
 const settingsBtn = $("#settings-btn");
@@ -466,6 +471,23 @@ function setState(next) {
   circleBtn.disabled = view.disabled;
   circleBtn.className = `circle ${STATE_CLASS[next]}`;
   if (next !== "error") setCaption(view.caption);
+
+  const legacyLabels = {
+    idle: ["desconectado", "Listo para conversar"],
+    connecting: ["conectando", "Solicitando micrófono…"],
+    queued: ["en cola", "Esperando un turno"],
+    "your-turn": ["listo", "Tu turno comienza ahora"],
+    listening: ["escuchando", "Micrófono activo"],
+    "user-speaking": ["escuchando", "Detectando tu voz"],
+    processing: ["procesando", "Gemma está preparando la respuesta"],
+    "ai-speaking": ["respondiendo", "Qwen3-TTS está hablando"],
+    error: ["error", "Revisa la conexión e inténtalo de nuevo"],
+  }[next];
+  if (legacyLabels) {
+    if (legacyConnection) legacyConnection.textContent = legacyLabels[0];
+    if (legacySystemTitle) legacySystemTitle.textContent = legacyLabels[1];
+    legacyPoint?.classList.toggle("live", LIVE_STATES.has(next));
+  }
 
   const live = LIVE_STATES.has(next);
   if (!live) {

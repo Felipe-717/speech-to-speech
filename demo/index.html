@@ -22,6 +22,7 @@
     <div id="app">
       <header class="topbar">
         <div class="brand">
+          <div class="marca" aria-hidden="true"><span><i></i><i></i><i></i><i></i><i></i></span></div>
           <div class="ident">
             <div class="ident-head">
               <a class="ident-title" href="https://github.com/Felipe-717/speech-to-speech" target="_blank" rel="noopener">Asistente de voz</a>
@@ -51,6 +52,11 @@
           </div>
         </div>
         <div class="topbar-right">
+          <div class="legacy-statusbar" aria-label="Estado de la demo">
+            <span class="pastilla"><span class="punto" id="punto"></span><span id="conexion">desconectado</span></span>
+            <span class="chip" id="contexto">Parakeet · Qwen3-TTS</span>
+            <span class="crono" id="crono" aria-label="Duración de la sesión"><b></b><span id="cronoTexto">00:00</span></span>
+          </div>
           <!-- HF login chip / sign-in pill. Populated by ui/account.js; only
                shown when the deploy runs behind a load balancer with OAuth. -->
           <div id="account" class="account" hidden></div>
@@ -70,7 +76,18 @@
         </div>
       </header>
 
-      <main class="stage">
+      <main class="stage legacy-stage">
+        <aside class="legacy-side legacy-left" aria-label="Contexto del sistema">
+          <section class="tarjeta-fija">
+            <h2 class="etiqueta">Sistema</h2>
+            <p class="titulo-dato" id="sistemaTitulo">Listo para conversar</p>
+            <p id="sistemaDetalle">ASR Parakeet · Gemma · Qwen3-TTS</p>
+          </section>
+          <div class="legacy-column" id="columnaUsuario" aria-live="polite">
+            <p class="legacy-column-empty">Tu transcripción aparecerá aquí.</p>
+          </div>
+        </aside>
+
         <div class="orb-wrap">
           <div id="mic-gate" class="mic-gate">
             <svg id="mic-gate-arc" class="mic-gate-arc" viewBox="0 0 100 100" aria-hidden="true">
@@ -138,6 +155,17 @@
           <button id="mode-ptt" class="mode-button" type="button" aria-pressed="false">Pulsar para hablar</button>
         </div>
         <p id="mode-hint" class="mode-hint">Habla normalmente; el sistema detecta cuándo terminas.</p>
+
+        <aside class="legacy-side legacy-right" aria-label="Pipeline de respuesta">
+          <section class="tarjeta-fija">
+            <h2 class="etiqueta">Pipeline de voz</h2>
+            <p class="titulo-dato">Voz clonada · Qwen3-TTS</p>
+            <p>Parakeet transcribe, Gemma responde y la referencia WAV da identidad a la voz.</p>
+          </section>
+          <div class="legacy-column" id="columnaAsistente" aria-live="polite">
+            <p class="legacy-column-empty">La respuesta hablada aparecerá aquí.</p>
+          </div>
+        </aside>
 
         <div id="queue-actions" class="queue-actions" hidden>
           <button id="join-queue-btn" class="join-queue-btn" type="button" hidden>
