@@ -96,7 +96,11 @@ Terminal 1: LLM local compatible con OpenAI. El nombre y la etiqueta GGUF son
 los publicados por el modelo:
 
 ```bash
-llama-server \
+if ! command -v llama >/dev/null 2>&1; then
+  curl -LsSf https://llama.app/install.sh | sh
+  source /root/.local/bin/env
+fi
+llama serve \
   -hf unsloth/gemma-4-12B-it-qat-GGUF:UD-Q4_K_XL \
   --host 127.0.0.1 --port 8000 --jinja -c 8192 -ngl 99
 ```
