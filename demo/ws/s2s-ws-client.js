@@ -1078,7 +1078,7 @@ export class S2sWsRealtimeClient extends EventTarget {
    * replay it once the active response finishes, so we never trip the
    * backend's `conversation_already_has_active_response` guard.
    *
-   * @param {{ image?: string }} [opts] Optional `image` (a data URL) sent as a
+   * @param {{ image?: string; instructions?: string }} [opts] Optional `image` (a data URL) sent as a
    *   user `input_image` immediately before this response.create — so the frame
    *   travels with the create (and is deferred together with it if queued),
    *   rather than being added to the conversation eagerly. Used by the camera
@@ -1093,6 +1093,17 @@ export class S2sWsRealtimeClient extends EventTarget {
     this._createResponseNow(opts);
   }
 
+  /** Inject a text turn into the current realtime conversation. */
+  sendText(text, instructions = "") {
+    const value = String(text || "").trim();
+    if (!value) return;
+    this._send({
+      type: "conversation.item.create",
+      item: { type: "message", role: "user", content: [{ type: "input_text", text: value }] },
+    });
+    this.requestResponse(instructions ? { instructions } : {});
+  }
+
   /** True while a response occupies the single backend slot. */
   _responseActive() {
     return this._openResponses > 0 || this._createInFlight;
@@ -1100,12 +1111,13 @@ export class S2sWsRealtimeClient extends EventTarget {
 
   /** Send a response.create immediately and arm the in-flight guard. Any image
    *  on the payload is added as user content right before the create.
-   *  @param {{ image?: string }} [opts] */
+   *  @param {{ image?: string; instructions?: string }} [opts] */
   _createResponseNow(opts = {}) {
     if (!this._ws || this._ws.readyState !== WebSocket.OPEN) return;
     if (opts.image) this.sendUserImage(opts.image);
     this._createInFlight = true;
-    this._send({ type: "response.create" });
+    const response = opts.instructions?.trim() ? { instructions: opts.instructions.trim() } : undefined;
+    this._send(response ? { type: "response.create", response } : { type: "response.create" });
   }
 
   /** Replay one queued response.create if the slot is now free. Called on every

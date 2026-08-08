@@ -154,6 +154,22 @@
         </div>
         <p id="mode-hint" class="mode-hint">Habla normalmente; el sistema detecta cuándo terminas.</p>
 
+        <form id="text-composer" class="text-composer" autocomplete="off">
+          <input id="text-input" type="text" placeholder="Escribe aunque estés silenciado…" aria-label="Mensaje de texto" disabled />
+          <button id="text-send" class="text-send" type="submit" aria-label="Enviar mensaje" disabled><span aria-hidden="true">↑</span></button>
+        </form>
+
+        <section id="task-card" class="task-card" hidden aria-live="polite">
+          <div class="task-card-head">
+            <div><span class="task-eyebrow">Tarea en segundo plano</span><h3 id="task-title">Tarea</h3></div>
+            <button id="task-cancel" class="task-cancel" type="button">Cancelar</button>
+          </div>
+          <div class="task-phase" id="task-phase">queued · queued</div>
+          <div class="task-progress-track" aria-hidden="true"><div id="task-progress" class="task-progress"></div></div>
+          <p id="task-message" class="task-message"></p>
+          <div id="task-sources" class="task-sources" hidden></div>
+        </section>
+
         <aside class="legacy-side legacy-right" aria-label="Pipeline de respuesta">
           <section class="tarjeta-fija">
             <h2 class="etiqueta">Pipeline de voz</h2>
@@ -388,7 +404,7 @@
           <div class="tool-row" id="tool-web-row">
             <div class="tool-info">
               <span class="tool-name">Web search</span>
-              <span class="tool-desc">Look things up on Google, via Serper.</span>
+              <span class="tool-desc">Buscar información actual en DuckDuckGo, sin API de pago.</span>
             </div>
             <label class="switch">
               <input id="tool-web" type="checkbox" />
@@ -396,9 +412,9 @@
             </label>
           </div>
           <label class="field tools-key">
-            <span>Search API key</span>
+            <span>Proveedor gratuito</span>
             <input id="search-key" type="password" autocomplete="off" spellcheck="false" />
-            <small id="tool-web-hint"></small>
+            <small id="tool-web-hint">DuckDuckGo se consulta desde el backend.</small>
           </label>
 
           <div class="tool-row tool-row-sep" id="tool-cam-row">

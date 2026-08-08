@@ -489,6 +489,17 @@ export class ChatView {
     this._bumpDismiss(this._activeUserBubble, 6000);
   }
 
+  /** Add a user-authored text turn immediately, before realtime responds. */
+  onTextMessage(text) {
+    const id = `_t${++this._anonSeq}`;
+    this._ensureUserHist(id);
+    const hist = this._userHistByItem.get(id);
+    this._updateHistMsg(hist, text, false);
+    const bubble = this._spawnBubble("user", text);
+    this._bumpDismiss(bubble);
+    this._markUnread();
+  }
+
   /**
    * A streamed transcript delta (user or assistant).
    * @param {{ role: "user" | "assistant"; text: string; partial: boolean; itemId?: string; responseId?: string }} d

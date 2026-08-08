@@ -50,6 +50,13 @@ Esperamos Python 3.12.x, PyTorch 2.8.0+cu128 (o equivalente CUDA 12.8), CUDA dis
 cd /workspace
 git clone -b main https://github.com/Felipe-717/speech-to-speech.git
 cd /workspace/speech-to-speech
+
+Para validar el agente experimental sin tocar `main`, usa la rama publicada
+`feature/agent-rag-web` al clonar o exporta antes del setup:
+
+```bash
+export S2S_BRANCH=feature/agent-rag-web
+```
 ~~~
 
 ## 4. Crear el entorno Python correcto

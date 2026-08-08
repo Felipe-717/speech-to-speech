@@ -5,12 +5,12 @@ The demo used to ship as a `sdk: static` Space, but the web-search tool needs a
 search key the browser must NOT see. A static Space has no runtime process, so it
 can't hold a secret the front-end uses. This server fixes that: it serves the
 unchanged front-end AND exposes a same-origin `/api/search` proxy that holds the
-Serper key server-side (see docs/adr/0001).
+keyless DuckDuckGo search and local RAG/task endpoints.
 
 Everything lives in one container; the speech-to-speech backend can stay a
 separate process. For RunPod, ``SPEECH_TO_SPEECH_INTERNAL_URL`` enables a
 same-origin WebSocket proxy so the browser only needs the demo's public HTTP
-port. The load-balancer's address is a secret too (like the Serper key): the
+port. The load-balancer's address is kept server-side too:
 browser never sees it. `/api/session` proxies the session handshake server-side
 so only the per-session compute URL the LB hands back (which the browser must
 dial) is exposed.
@@ -27,7 +27,12 @@ browser connects directly to that URL, shown read-only in Settings.
 Endpoints:
   GET  /api/config           -> { search, lb, allowDirect, s2sUrl, rtc, iceServers, auth }
   GET  /api/me               -> login + tier + remaining budget (LB mode only)
-  POST /api/search           -> { results, answer }  Google via Serper.dev
+  POST /api/search           -> { results } DuckDuckGo via ddgs
+  POST /api/rag/search       -> local RAG snippets
+  POST /api/tasks             -> create a background task
+  GET  /api/tasks/{id}        -> task snapshot
+  GET  /api/tasks/{id}/events -> task progress (SSE)
+  POST /api/tasks/{id}/cancel -> cancel a task
   POST /api/calls            -> proxies the WebRTC SDP offer to <s2s>/v1/realtime/calls
   POST /api/session          -> proxies <LB>/session: a grant, or a queue ticket
   GET  /api/queue/{id}       -> proxies <LB>/queue/{id}: position, or a grant on claim
@@ -54,13 +59,21 @@ import httpx
 import limiter
 import websockets
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+try:  # supports both ``uvicorn server:app`` from demo/ and package imports
+    from .rag import RagIndex
+    from .search import search_web
+    from .tasks import TaskLimitError, TaskManager, event_json
+except ImportError:  # pragma: no cover - script-style import used by RunPod
+    from rag import RagIndex
+    from search import search_web
+    from tasks import TaskLimitError, TaskManager, event_json
+
 logger = logging.getLogger("s2s.search")
 
-SERPER_KEY = os.environ.get("SERPER_API_KEY", "").strip()
 # Speech-to-speech load balancer URL. When set, the browser POSTs /api/session
 # (which proxies <lb>/session here, server-side) and connects to the URL the LB
 # returns (the original flow). The LB address itself is never sent to the browser.
@@ -135,13 +148,14 @@ def _webrtc_calls_url(s2s_url: str) -> str:
     return urlunsplit((scheme, parts.netloc, path.rstrip("/") + "/calls", parts.query, ""))
 
 
-SERPER_URL = "https://google.serper.dev/search"
 # Cap results so the tool output stays small enough to feed back to the model.
 MAX_RESULTS = 5
 HERE = os.path.dirname(os.path.abspath(__file__))
 LB_USER_AGENT = "speech-to-speech-demo"
 
 app = FastAPI(title="s2s-demo")
+rag_index = RagIndex(os.environ.get("RAG_ROOT") or None)
+task_manager = TaskManager(rag_index)
 
 # Wire HF OAuth before the app serves (no-op unless the OAuth env is present).
 # Sign-in only matters when we're metering (prod Space), so gate it on that.
@@ -151,10 +165,14 @@ AUTH_ENABLED = LIMITER_ENABLED and auth.attach(app)
 @app.on_event("startup")
 async def _startup():
     """Stand up the usage DB and a periodic sweeper — metered (prod Space) only."""
-    if not LIMITER_ENABLED:
-        return
-    limiter.init()
-    asyncio.create_task(_sweeper())
+    if LIMITER_ENABLED:
+        limiter.init()
+        asyncio.create_task(_sweeper())
+
+
+@app.on_event("shutdown")
+async def _shutdown_tasks():
+    await task_manager.shutdown()
 
 
 async def _sweeper():
@@ -168,9 +186,16 @@ async def _sweeper():
 
 class SearchRequest(BaseModel):
     query: str
-    # Optional user-supplied key (fallback when the deploy has no server key).
-    # Used for this request only; never stored.
-    key: str | None = None
+
+
+class RagSearchRequest(BaseModel):
+    query: str
+    limit: int = 5
+
+
+class TaskCreateRequest(BaseModel):
+    goal: str
+    session_id: str = "anonymous"
 
 
 @app.get("/health")
@@ -183,9 +208,9 @@ def health():
     """
     return {
         "componentes": [],
-        "chunks_indexados": 0,
+        "chunks_indexados": rag_index.status()["chunks"],
         "modelo": os.environ.get("LLM_MODEL", "Realtime S2S pipeline"),
-        "voz": os.environ.get("TTS_VOICE", "Serena"),
+        "voz": os.environ.get("TTS_VOICE", "Qwen3-TTS clonada"),
         "voz_en_vivo": True,
         "modo_local": False,
         "modo_entrada": "pulsar",
@@ -199,7 +224,9 @@ def config():
     whether HF sign-in is available, and whether the user may instead set a direct
     s2s server URL. The LB address itself is intentionally NOT included."""
     return {
-        "search": bool(SERPER_KEY),
+        "search": True,
+        "searchProvider": "duckduckgo",
+        "rag": rag_index.status(),
         "lb": bool(LOAD_BALANCER_URL),
         "allowDirect": not LOAD_BALANCER_URL,
         # Deploy-pinned direct s2s URL (empty when unset). Not a secret: the
@@ -302,60 +329,70 @@ async def me(request: Request):
 
 @app.post("/api/search")
 async def search(req: SearchRequest):
-    """Proxy a Google search via Serper.dev. The key stays on the server unless
-    the user brought their own (then theirs is used for this request only)."""
+    """Run a keyless DuckDuckGo search off the event loop."""
     query = (req.query or "").strip()
     if not query:
         raise HTTPException(status_code=400, detail="Empty query.")
 
-    key = (req.key or "").strip() or SERPER_KEY
-    if not key:
-        # No server key and the user didn't supply one — search is unavailable.
-        raise HTTPException(status_code=503, detail="Search is not configured.")
-
-    headers = {"X-API-KEY": key, "Content-Type": "application/json"}
-    payload = {"q": query, "num": MAX_RESULTS}
     try:
-        async with httpx.AsyncClient(timeout=12.0) as http:
-            resp = await http.post(SERPER_URL, headers=headers, json=payload)
-    except httpx.RequestError as exc:
-        logger.warning("Serper unreachable: %r", exc)
-        raise HTTPException(status_code=502, detail="Search provider unreachable.")
+        results = await asyncio.to_thread(search_web, query, max_results=MAX_RESULTS)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return JSONResponse({"query": query, "provider": "duckduckgo", "results": results})
 
-    if resp.status_code != 200:
-        # Serper's error body carries the real reason (e.g. "Not enough
-        # credits") and contains no key, so it's safe to log and relay.
-        body = resp.text[:300]
-        logger.warning("Serper error %s: %s", resp.status_code, body)
-        msg = None
-        try:
-            msg = resp.json().get("message")
-        except Exception:
-            pass
-        detail = f"Search provider error ({resp.status_code})"
-        if msg:
-            detail += f": {msg}"
-        raise HTTPException(status_code=502, detail=detail)
 
-    data = resp.json()
-    results = []
-    for item in (data.get("organic") or [])[:MAX_RESULTS]:
-        results.append(
-            {
-                "title": item.get("title", ""),
-                "snippet": item.get("snippet", ""),
-                "url": item.get("link", ""),
-            }
-        )
 
-    # A direct answer when Google has one — saves the model a hop.
-    box = data.get("answerBox") or {}
-    answer = box.get("answer") or box.get("snippet") or None
-    if not answer:
-        kg = data.get("knowledgeGraph") or {}
-        answer = kg.get("description") or None
+@app.post("/api/rag/search")
+async def rag_search(req: RagSearchRequest):
+    query = (req.query or "").strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="Empty query.")
+    results = await asyncio.to_thread(rag_index.search, query, max(1, min(req.limit, 10)))
+    return JSONResponse({"query": query, "results": results})
 
-    return JSONResponse({"query": query, "answer": answer, "results": results})
+
+@app.post("/api/tasks")
+async def create_task(req: TaskCreateRequest):
+    try:
+        task = await task_manager.create(req.session_id, req.goal)
+    except TaskLimitError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse(task.as_dict(), status_code=201)
+
+
+@app.get("/api/tasks/{task_id}")
+async def get_task(task_id: str):
+    task = await task_manager.get(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return JSONResponse(task.as_dict())
+
+
+@app.post("/api/tasks/{task_id}/cancel")
+async def cancel_task(task_id: str):
+    task = await task_manager.cancel(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return JSONResponse(task.as_dict())
+
+
+@app.get("/api/tasks/{task_id}/events")
+async def task_events(task_id: str):
+    task = await task_manager.get(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    async def stream():
+        async for event in task_manager.subscribe(task_id):
+            yield f"data: {event_json(event)}\n\n"
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/api/calls")

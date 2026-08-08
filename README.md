@@ -29,6 +29,19 @@ documentación general de sus componentes intercambiables.
 - Qwen3-TTS Base con referencia de voz clonada y caché `.spk/.rvq`.
 - Historial visual de conversación, sin cámara, RAG ni entrada de texto en esta fase.
 
+## Rama experimental: texto, RAG y agente
+
+La rama `feature/agent-rag-web` añade, sin modificar esta demo estable:
+
+- Entrada de texto en la misma sesión realtime.
+- RAG local persistente en SQLite/FTS5 bajo `/workspace/rag`.
+- Búsqueda web gratuita mediante `ddgs`/DuckDuckGo, sin API key.
+- Tareas largas cancelables con progreso SSE y una tarjeta en el frontend.
+
+Para probarla, sigue la [guía experimental](./docs/experimental-agent-rag.md).
+Mantén un volumen persistente montado en `/workspace` si quieres conservar el
+índice y los documentos entre Pods.
+
 ## Arquitectura
 
 ```text

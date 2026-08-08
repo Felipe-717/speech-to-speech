@@ -149,6 +149,10 @@ activemq-data/
 
 # Environments
 .env
+
+# Experimental local knowledge index (keep source documents and SQLite out of Git)
+data/rag/
+data/knowledge/
 .envrc
 .venv
 env/

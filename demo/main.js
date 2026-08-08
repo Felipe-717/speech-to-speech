@@ -24,10 +24,10 @@ import { ChatView } from "./ui/chat.js";
 import { Account } from "./ui/account.js";
 
 const DEFAULT_VOICE = "Aiden";
-// This deployment is intentionally voice-only while the warm UI is being
-// reintegrated. Keep the upstream DOM contract, but do not expose transports,
-// tools, text, or camera controls that are not part of the validated demo.
-const VOICE_ONLY_DEMO = true;
+// Experimental branch: keep the proven voice transport, but re-enable text,
+// web search, local RAG and background-task controls. Camera/WebRTC remain out
+// of scope for this branch.
+const VOICE_ONLY_DEMO = false;
 const DEFAULT_INSTRUCTIONS =
   "Eres un asistente de voz amable y natural. Responde siempre en español, " +
   "con respuestas breves, cálidas y fáciles de escuchar. Evita los monólogos largos.";
@@ -41,7 +41,8 @@ const TOOL_USE_HINT =
   " When the user's request calls for one of your tools, do not describe your " +
   "capabilities or say you can do it and wait for another turn. Instead, say " +
   'a brief acknowledgement like "Let me search for that..." and call the tool ' +
-  "right away in the same response.";
+  "right away in the same response. Para tareas largas usa start_background_task; " +
+  "para documentos usa knowledge_search; para el progreso usa get_task_status.";
 
 const STORAGE_KEYS = {
   // Direct s2s server URL, used only when the deploy has no LOAD_BALANCER_URL
@@ -94,6 +95,38 @@ const TOOL_DEFS = {
       properties: { query: { type: "string", description: "The search query." } },
       required: ["query"],
     },
+  },
+  knowledge_search: {
+    type: "function",
+    name: "knowledge_search",
+    description: "Busca información relevante en los documentos locales indexados en el RAG.",
+    parameters: {
+      type: "object",
+      properties: { query: { type: "string", description: "La consulta para el índice local." } },
+      required: ["query"],
+    },
+  },
+  start_background_task: {
+    type: "function",
+    name: "start_background_task",
+    description: "Crea una tarea larga y cancelable cuando el usuario pide investigar, resumir o preparar algo complejo.",
+    parameters: {
+      type: "object",
+      properties: { goal: { type: "string", description: "Objetivo concreto de la tarea." } },
+      required: ["goal"],
+    },
+  },
+  get_task_status: {
+    type: "function",
+    name: "get_task_status",
+    description: "Consulta el estado más reciente de la tarea de fondo activa.",
+    parameters: { type: "object", properties: {}, required: [] },
+  },
+  cancel_background_task: {
+    type: "function",
+    name: "cancel_background_task",
+    description: "Cancela la tarea de fondo activa cuando el usuario lo solicita.",
+    parameters: { type: "object", properties: {}, required: [] },
   },
   camera_snapshot: {
     type: "function",
@@ -179,10 +212,10 @@ function loadTools() {
     // silently resume the webcam; an explicit saved `false` is respected.
     return {
       web_search: raw.web_search ?? true,
-      camera_snapshot: raw.camera_snapshot ?? true,
+      camera_snapshot: false,
     };
   } catch {
-    return { web_search: true, camera_snapshot: true };
+    return { web_search: true, camera_snapshot: false };
   }
 }
 
@@ -272,6 +305,8 @@ const toolWebSwitch = $("#tool-web");
 /** @type {HTMLInputElement} */
 const toolCamSwitch = $("#tool-cam");
 /** @type {HTMLElement} */
+const toolCamRow = $("#tool-cam-row");
+/** @type {HTMLElement} */
 const toolWebRow = $("#tool-web-row");
 /** @type {HTMLElement} */
 const toolWebHint = $("#tool-web-hint");
@@ -283,6 +318,26 @@ const searchKeyInput = $("#search-key");
 const camPip = $("#cam-pip");
 /** @type {HTMLVideoElement} */
 const camVideo = $("#cam-video");
+/** @type {HTMLFormElement} */
+const textComposer = $("#text-composer");
+/** @type {HTMLInputElement} */
+const textInput = $("#text-input");
+/** @type {HTMLButtonElement} */
+const textSend = $("#text-send");
+/** @type {HTMLElement} */
+const taskCard = $("#task-card");
+/** @type {HTMLElement} */
+const taskTitle = $("#task-title");
+/** @type {HTMLElement} */
+const taskPhase = $("#task-phase");
+/** @type {HTMLElement} */
+const taskProgress = $("#task-progress");
+/** @type {HTMLElement} */
+const taskMessage = $("#task-message");
+/** @type {HTMLButtonElement} */
+const taskCancel = $("#task-cancel");
+/** @type {HTMLElement} */
+const taskSources = $("#task-sources");
 
 /** @type {HTMLInputElement} */
 const inputLbUrl = $("#lb-url");
@@ -365,7 +420,7 @@ let activeTransport = "ws";
 
 // ── Tool state ──────────────────────────────────────────────────────────────
 let toolsEnabled = loadTools();
-// Whether the server holds a Serper key (learned from /api/config on load).
+// Whether the server exposes the keyless search provider.
 let serverSearchKey = false;
 // A user-supplied key (fallback when the deploy has none). localStorage only.
 let userSearchKey = localStorage.getItem(STORAGE_KEYS.searchKey) || "";
@@ -374,14 +429,13 @@ let cameraStream = null;
 
 /** Search is usable if the server has a key or the user supplied one. */
 function searchAvailable() {
-  return serverSearchKey || !!userSearchKey;
+  return serverSearchKey;
 }
 
 /** Tool definitions for the currently-enabled (and usable) tools. */
 function activeToolDefs() {
-  const defs = [];
+  const defs = [TOOL_DEFS.knowledge_search, TOOL_DEFS.start_background_task, TOOL_DEFS.get_task_status, TOOL_DEFS.cancel_background_task];
   if (toolsEnabled.web_search && searchAvailable()) defs.push(TOOL_DEFS.web_search);
-  if (toolsEnabled.camera_snapshot) defs.push(TOOL_DEFS.camera_snapshot);
   return defs;
 }
 
@@ -397,7 +451,7 @@ function pushToolsToSession() {
   client.setTools(activeToolDefs());
   // The hidden tool-use hint depends on whether any tool is active, so refresh
   // instructions alongside the tool set.
-  client.updateSession({ instructions: effectiveInstructions() });
+  client.updateSession({ instructions: effectiveInstructions() + taskStatusInstruction() });
 }
 
 // ── Chat view ───────────────────────────────────────────────────────────────
@@ -432,6 +486,18 @@ let micMuted = false;
 /** @type {"live" | "ptt"} */
 let inputMode = settings.inputMode;
 let pttActive = false;
+const taskSessionId = (() => {
+  const key = "s2s.task.session";
+  const old = localStorage.getItem(key);
+  if (old) return old;
+  const id = globalThis.crypto?.randomUUID?.() || `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  localStorage.setItem(key, id);
+  return id;
+})();
+/** @type {Record<string, any> | null} */
+let activeTask = null;
+/** @type {EventSource | null} */
+let taskEvents = null;
 
 /** Apply both the user's mute choice and the temporary replay guard. */
 function syncMicMuteState() {
@@ -475,6 +541,9 @@ function setState(next) {
   currentState = next;
   const view = STATE_VIEWS[next];
   circleBtn.disabled = view.disabled;
+  const textEnabled = LIVE_STATES.has(next);
+  textInput.disabled = !textEnabled;
+  textSend.disabled = !textEnabled;
   circleBtn.className = `circle ${STATE_CLASS[next]}`;
   if (next !== "error") setCaption(view.caption);
 
@@ -716,6 +785,15 @@ function syncToolsUi() {
   toolWebSwitch.disabled = !avail;
   toolWebRow.classList.toggle("disabled", !avail);
   toolCamSwitch.checked = toolsEnabled.camera_snapshot;
+  toolCamSwitch.disabled = true;
+  toolCamRow.hidden = true;
+  searchKeyInput.value = "";
+  searchKeyInput.disabled = true;
+  searchKeyInput.placeholder = "No requiere API key";
+  toolWebHint.textContent = avail
+    ? "DuckDuckGo se consulta desde el backend; puede aplicar límites de tráfico."
+    : "El proveedor web no está disponible en este servidor.";
+  return;
 
   if (serverSearchKey) {
     // Key lives server-side: show it as configured, never expose it.
@@ -726,10 +804,10 @@ function syncToolsUi() {
   } else {
     searchKeyInput.disabled = false;
     searchKeyInput.value = userSearchKey;
-    searchKeyInput.placeholder = "Paste a Serper key to enable web search";
+    searchKeyInput.placeholder = "No requiere API key";
     toolWebHint.textContent = userSearchKey
       ? "Using your key — stored in this browser only."
-      : "No server key configured. Add your own Serper key to enable web search.";
+      : "DuckDuckGo se consulta sin API key desde el backend.";
   }
 }
 
@@ -792,7 +870,7 @@ searchKeyInput.addEventListener("input", () => {
   }
   toolWebHint.textContent = userSearchKey
     ? "Using your key — stored in this browser only."
-    : "No server key configured. Add your own Serper key to enable web search.";
+    : "DuckDuckGo se consulta sin API key desde el backend.";
 });
 
 // ── Camera ──────────────────────────────────────────────────────────────────
@@ -925,6 +1003,124 @@ function flashPreview() {
  * @param {string} name @param {string} argsJson @param {string} callId
  * @returns {Promise<{ output: string, image?: string }>}
  */
+function taskStatusInstruction() {
+  if (!activeTask) return "";
+  return [
+    "\n\nESTADO INTERNO DE TAREA EN SEGUNDO PLANO:",
+    `Objetivo: ${activeTask.goal || ""}`,
+    `Estado: ${activeTask.status || ""}`,
+    `Fase: ${activeTask.phase || ""}`,
+    `Progreso: ${Number(activeTask.progress || 0)}%`,
+    `Último mensaje: ${activeTask.message || ""}`,
+    `Resultado disponible: ${activeTask.final_result || activeTask.partial_result ? "sí" : "no"}`,
+    "Si el usuario pregunta por la tarea, informa solo con este estado; no inventes avances.",
+  ].join("\n");
+}
+
+function updateTaskContext() {
+  if (!client || !LIVE_STATES.has(currentState)) return;
+  client.updateSession({ instructions: effectiveInstructions() + taskStatusInstruction() });
+}
+
+function renderTask(task) {
+  activeTask = task;
+  if (!task) {
+    taskCard.hidden = true;
+    updateTaskContext();
+    return;
+  }
+  taskCard.hidden = false;
+  taskTitle.textContent = task.goal || "Tarea en segundo plano";
+  taskPhase.textContent = `${task.phase || task.status || "queued"} · ${task.status || "queued"}`;
+  taskProgress.style.width = `${Math.max(0, Math.min(100, Number(task.progress || 0)))}%`;
+  taskProgress.setAttribute("aria-valuenow", String(task.progress || 0));
+  const finalResult = typeof task.final_result === "string" ? task.final_result.trim() : "";
+  taskMessage.textContent = task.error || (task.status === "completed" && finalResult
+    ? finalResult
+    : task.message || finalResult);
+  taskSources.replaceChildren();
+  const sources = Array.isArray(task.sources) ? task.sources : [];
+  for (const source of sources.slice(0, 5)) {
+    const item = document.createElement("div");
+    item.className = "task-source";
+    const title = typeof source.title === "string" && source.title.trim()
+      ? source.title.trim()
+      : (typeof source.source === "string" ? source.source : "Fuente");
+    const url = typeof source.url === "string" ? source.url.trim() : "";
+    if (url && /^https?:\\/\\//i.test(url)) {
+      const link = document.createElement("a");
+      link.href = url;
+      link.target = "_blank";
+      link.rel = "noreferrer noopener";
+      link.textContent = title;
+      item.append(link);
+    } else {
+      item.textContent = title;
+    }
+    taskSources.append(item);
+  }
+  taskSources.hidden = sources.length === 0;
+  taskCancel.hidden = !["queued", "running"].includes(task.status);
+  taskCard.classList.toggle("task-complete", task.status === "completed");
+  taskCard.classList.toggle("task-error", task.status === "failed");
+  updateTaskContext();
+}
+
+function subscribeToTask(taskId) {
+  taskEvents?.close();
+  taskEvents = new EventSource(`api/tasks/${encodeURIComponent(taskId)}/events`);
+  taskEvents.onmessage = (event) => {
+    try { renderTask(JSON.parse(event.data)); } catch (err) { console.warn("invalid task event", err); }
+    if (["completed", "failed", "cancelled"].includes(activeTask?.status)) {
+      taskEvents?.close();
+      taskEvents = null;
+    }
+  };
+}
+
+async function createBackgroundTask(goal) {
+  const res = await fetch("api/tasks", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ goal, session_id: taskSessionId }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `task error (${res.status})`);
+  renderTask(data);
+  subscribeToTask(data.task_id);
+  return `Tarea creada con id ${data.task_id}. El progreso se muestra en pantalla y puedes preguntarme por su estado.`;
+}
+
+async function currentTaskStatus() {
+  if (!activeTask?.task_id) return "No hay una tarea activa.";
+  const res = await fetch(`api/tasks/${encodeURIComponent(activeTask.task_id)}`);
+  if (!res.ok) return "No se pudo consultar la tarea.";
+  const data = await res.json();
+  renderTask(data);
+  return JSON.stringify(data, null, 2);
+}
+
+async function cancelBackgroundTask() {
+  if (!activeTask?.task_id) return "No hay una tarea activa.";
+  const res = await fetch(`api/tasks/${encodeURIComponent(activeTask.task_id)}/cancel`, { method: "POST" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `cancel error (${res.status})`);
+  renderTask(data);
+  return `Cancelación solicitada para ${data.task_id}.`;
+}
+
+async function execKnowledgeSearch(query) {
+  const res = await fetch("api/rag/search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query, limit: 5 }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `RAG error (${res.status})`);
+  if (!data.results?.length) return "No hay fragmentos relevantes en el RAG local.";
+  return data.results.map((item) => `- ${item.title || item.source}: ${item.text} (${item.source})`).join("\n");
+}
+
 async function runTool(name, argsJson, callId) {
   if (!client) return { output: "" };
   let args = /** @type {Record<string, unknown>} */ ({});
@@ -941,6 +1137,18 @@ async function runTool(name, argsJson, callId) {
       result.output = await execWebSearch(query);
       // Return the result and let the bare response.create (below) trigger the
       // spoken answer.
+      client.sendToolOutput(callId, result.output);
+    } else if (name === "knowledge_search") {
+      result.output = await execKnowledgeSearch(typeof args.query === "string" ? args.query : "");
+      client.sendToolOutput(callId, result.output);
+    } else if (name === "start_background_task") {
+      result.output = await createBackgroundTask(typeof args.goal === "string" ? args.goal : "");
+      client.sendToolOutput(callId, result.output);
+    } else if (name === "get_task_status") {
+      result.output = await currentTaskStatus();
+      client.sendToolOutput(callId, result.output);
+    } else if (name === "cancel_background_task") {
+      result.output = await cancelBackgroundTask();
       client.sendToolOutput(callId, result.output);
     } else if (name === "camera_snapshot") {
       const dataUrl = captureSnapshot();
@@ -969,22 +1177,20 @@ async function runTool(name, argsJson, callId) {
   if (DEBUG) console.debug(`[tool] requesting model response after ${name}`);
   // Camera: the captured frame rides with the response.create (sent just before
   // it) so it's in context for the reply. Other tools: a bare create.
-  client.requestResponse(result.image ? { image: result.image } : undefined);
+  client.requestResponse({
+    ...(result.image ? { image: result.image } : {}),
+    instructions: taskStatusInstruction(),
+  });
   return result;
 }
 
 /** @param {string} query @returns {Promise<string>} */
 async function execWebSearch(query) {
   if (!query) return "No query provided.";
-  /** @type {Record<string, string>} */
-  const body = { query };
-  // Only send a user key when there's no server key (server prefers its own).
-  if (!serverSearchKey && userSearchKey) body.key = userSearchKey;
-
   const res = await fetch("api/search", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ query }),
   });
   if (!res.ok) {
     let detail = String(res.status);
@@ -992,12 +1198,8 @@ async function execWebSearch(query) {
     throw new Error(`search error (${detail})`);
   }
   const json = await res.json();
-  // Date-stamp the header so the model treats these as fresh realtime facts
-  // rather than its (older) training knowledge.
-  const today = new Date().toISOString().slice(0, 10);
   /** @type {string[]} */
-  const lines = [`Google search result from ${today}:`];
-  if (json.answer) lines.push(`Answer: ${json.answer}`);
+  const lines = ["Resultados de DuckDuckGo:"];
   for (const r of json.results || []) {
     lines.push(`- ${r.title}: ${r.snippet} (${r.url})`);
   }
@@ -1135,21 +1337,18 @@ function transportSelectable() {
 
 /** The transport the next conversation will actually use. */
 function effectiveTransport() {
-  if (VOICE_ONLY_DEMO) return "ws";
-  return transportSelectable() && settings.transport === "webrtc" ? "webrtc" : "ws";
+  return "ws";
 }
 
 /** Reflect transport availability + selection into Settings, and hide the
  *  noise gate when WebRTC is picked (the gate lives in the WS capture
  *  worklet; the WebRTC mic path sends the raw track). */
 function syncTransportUi() {
-  if (VOICE_ONLY_DEMO) {
-    transportField.hidden = true;
-    inputTransport.value = "ws";
-    inputTransport.disabled = true;
-    gateField.hidden = false;
-    return;
-  }
+  transportField.hidden = true;
+  inputTransport.value = "ws";
+  inputTransport.disabled = true;
+  gateField.hidden = false;
+  return;
   // Hidden in LB mode (nothing to choose); visible-but-locked in un-pinned
   // direct mode so the option is discoverable along with what unlocks it.
   transportField.hidden = !allowDirect;
@@ -1215,7 +1414,7 @@ settingsForm.addEventListener("submit", (event) => {
   // output can switch live when the browser supports AudioContext.setSinkId;
   // mic device changes need a Restart (new getUserMedia stream).
   if (client && LIVE_STATES.has(currentState)) {
-    client.updateSession({ voice: settings.voice, instructions: effectiveInstructions() });
+    client.updateSession({ voice: settings.voice, instructions: effectiveInstructions() + taskStatusInstruction() });
     if (typeof client.setAudioOutputDevice === "function") {
       void client.setAudioOutputDevice(settings.audioOutputId);
     }
@@ -1339,6 +1538,17 @@ document.addEventListener("keyup", (event) => {
     setPttActive(false);
   }
 });
+
+textComposer.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const text = textInput.value.trim();
+  if (!text || !client || !LIVE_STATES.has(currentState)) return;
+  chat.onTextMessage(text);
+  client.sendText(text, taskStatusInstruction());
+  textInput.value = "";
+});
+
+taskCancel.addEventListener("click", () => { void cancelBackgroundTask(); });
 
 micBtn.addEventListener("click", () => {
   if (!micStream || !client) return;
@@ -1568,7 +1778,7 @@ async function doStart(audioContext = null) {
 
   const common = {
     voice: settings.voice,
-    instructions: effectiveInstructions(),
+    instructions: effectiveInstructions() + taskStatusInstruction(),
     startupGreeting,
     acquireMic: acquireMicStream,
     tools: VOICE_ONLY_DEMO ? [] : activeToolDefs(),
