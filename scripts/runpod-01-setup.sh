@@ -79,7 +79,7 @@ else
   else
     echo "AVISO: falta $VOICE_DIR/voz_referencia.wav" >&2
     echo "Cópialo desde PowerShell con scp y vuelve a ejecutar este script." >&2
-    echo "Ejemplo: scp -P PUERTO_SSH -i C:\\Users\\felip\\.ssh\\id_ed25519 \\\"voz_referencia.wav\\\" root@IP_DEL_POD:$VOICE_DIR/voz_referencia.wav" >&2
+    echo "Ejemplo: scp -P PUERTO_SSH -i C:\\Users\\TU_USUARIO\\.ssh\\id_ed25519 \\\"voz_referencia.wav\\\" root@IP_DEL_POD:$VOICE_DIR/voz_referencia.wav" >&2
   fi
 fi
 

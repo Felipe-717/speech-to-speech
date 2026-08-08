@@ -67,7 +67,7 @@ entorno, los modelos descargados y la caché de voz.
 Ejecuta en PowerShell el comando que entrega RunPod:
 
 ```powershell
-ssh root@IP_DEL_POD -p PUERTO_SSH -i C:\Users\felip\.ssh\id_ed25519
+ssh root@IP_DEL_POD -p PUERTO_SSH -i C:\Users\TU_USUARIO\.ssh\id_ed25519
 ```
 
 ### 3. Clonar `main`
@@ -90,8 +90,8 @@ Desde PowerShell local, reemplaza los valores de RunPod:
 
 ```powershell
 scp -P PUERTO_SSH `
-  -i C:\Users\felip\.ssh\id_ed25519 `
-  "C:\Users\felip\Documents\Voicebot\data\voices\voz_referencia.wav" `
+  -i C:\Users\TU_USUARIO\.ssh\id_ed25519 `
+  "C:\ruta\a\tu\voz_referencia.wav" `
   root@IP_DEL_POD:/workspace/voices/voz_referencia.wav
 ```
 
@@ -152,7 +152,7 @@ ssh -N `
   -L 7860:127.0.0.1:7860 `
   -L 8765:127.0.0.1:8765 `
   -p PUERTO_SSH `
-  -i C:\Users\felip\.ssh\id_ed25519 `
+  -i C:\Users\TU_USUARIO\.ssh\id_ed25519 `
   root@IP_DEL_POD
 ```
 
@@ -250,5 +250,5 @@ Sin volumen persistente, crea un Pod nuevo y repite desde la copia del WAV.
 ## Documentación de referencia
 
 - [Receta completa de RunPod](./docs/runpod-first-boot.md)
-- Handoff local del frontend personalizado: `C:\Users\felip\Documents\Voicebot\docs\handoff-front.md`.
+- Handoff del frontend personalizado: conserva el documento de diseño del proyecto fuera del repositorio si contiene rutas locales.
 - [Repositorio upstream](https://github.com/huggingface/speech-to-speech)

@@ -13,7 +13,7 @@ hf_oauth_expiration_minutes: 10080
 
 # Realtime Voice Demo
 
-## Felipe Voicebot foundation
+## Demo foundation
 
 The demo uses the upstream browser client and worklets directly:
 `ws/s2s-ws-client.js`, `worklets/mic-capture.js`, and

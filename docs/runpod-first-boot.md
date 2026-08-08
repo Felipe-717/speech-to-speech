@@ -25,7 +25,7 @@ con ese puerto desde el principio.
 En RunPod: Pods → Pod → Connect → SSH. Copiar el comando que muestra el panel y ejecutarlo desde PowerShell local:
 
 ~~~powershell
-ssh root@IP_DEL_POD -p PUERTO -i C:\Users\felip\.ssh\id_ed25519
+ssh root@IP_DEL_POD -p PUERTO -i C:\Users\TU_USUARIO\.ssh\id_ed25519
 ~~~
 
 SSH es preferible al Web Terminal para procesos largos.
@@ -126,8 +126,8 @@ e `IP_DEL_POD` por los valores reales que aparecen en RunPod en
 `Connect → SSH`; no ejecutes esos textos literalmente:
 
 ~~~powershell
-scp -P PUERTO_SSH -i C:\Users\felip\.ssh\id_ed25519 `
-  "C:\Users\felip\Documents\Voicebot\data\voices\voz_referencia.wav" `
+scp -P PUERTO_SSH -i C:\Users\TU_USUARIO\.ssh\id_ed25519 `
+  "C:\ruta\a\tu\voz_referencia.wav" `
 root@IP_DEL_POD:/workspace/voices/voz_referencia.wav
 ~~~
 
@@ -186,8 +186,8 @@ En PowerShell local:
 
 ~~~powershell
 scp -P PUERTO_SSH `
-  -i C:\Users\felip\.ssh\id_ed25519 `
-  "C:\Users\felip\Documents\Voicebot\data\voices\voz_referencia.wav" `
+  -i C:\Users\TU_USUARIO\.ssh\id_ed25519 `
+  "C:\ruta\a\tu\voz_referencia.wav" `
   root@IP_DEL_POD:/workspace/voices/voz_referencia.wav
 ~~~
 
@@ -334,7 +334,7 @@ ssh -N `
   -L 7860:127.0.0.1:7860 `
   -L 8765:127.0.0.1:8765 `
   -p PUERTO_SSH `
-  -i C:\Users\felip\.ssh\id_ed25519 `
+  -i C:\Users\TU_USUARIO\.ssh\id_ed25519 `
   root@IP_DEL_POD
 ~~~
 
