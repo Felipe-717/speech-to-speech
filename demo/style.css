@@ -3044,13 +3044,15 @@ body.voice-only-demo .bubble-stack, .bubble-stack {
   left: clamp(22px, 4vw, 58px);
   width: auto;
   max-height: none;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  align-content: end;
-  align-items: end;
-  gap: 10px clamp(24px, 8vw, 150px);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: stretch;
+  gap: 10px;
   pointer-events: none;
   overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, rgba(0,0,0,.55) 12%, #000 26%);
+  mask-image: linear-gradient(to bottom, transparent 0, rgba(0,0,0,.55) 12%, #000 26%);
 }
 .bubble-stack .bubble {
   width: min(330px, 100%);
@@ -3059,18 +3061,15 @@ body.voice-only-demo .bubble-stack, .bubble-stack {
   pointer-events: auto;
 }
 .bubble-stack .bubble.user {
-  grid-column: 1;
-  justify-self: end;
-  align-self: end;
+  align-self: flex-start;
+  margin-left: clamp(4%, 22vw, 31%);
 }
 .bubble-stack .bubble.assistant {
-  grid-column: 2;
-  justify-self: start;
-  align-self: end;
+  align-self: flex-end;
+  margin-right: clamp(4%, 22vw, 31%);
 }
 .bubble-stack .bubble.tool {
-  grid-column: 1 / -1;
-  justify-self: center;
+  align-self: center;
 }
 .bubble-stack .bubble.out { pointer-events: none; }
 
@@ -3080,13 +3079,12 @@ body.voice-only-demo .bubble-stack, .bubble-stack {
     left: 16px;
     right: 16px;
     bottom: 90px;
-    grid-template-columns: 1fr;
     gap: 8px;
   }
   .bubble-stack .bubble.user,
   .bubble-stack .bubble.assistant,
   .bubble-stack .bubble.tool {
-    grid-column: 1;
-    justify-self: center;
+    align-self: center;
+    margin-inline: 0;
   }
 }

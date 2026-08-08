@@ -152,12 +152,11 @@ export class ChatView {
       el = this._buildMessageEl({ container: "bubble", prefix: "bubble", role, text });
     }
     this._bubbleStack.appendChild(el);
-    // Keep the last four turns for each speaker visible around the orb. The
-    // original Voicebot surface treats these as a compact conversation strip,
-    // not toast notifications that vanish while the user is reading them.
-    const roleSelector = role === "tool" ? ".bubble.tool:not(.out)" : `.bubble.${role}:not(.out)`;
-    const visible = /** @type {HTMLElement[]} */ ([...this._bubbleStack.querySelectorAll(roleSelector)]);
-    if (visible.length > 4) {
+    // Keep one chronological stream around the orb. The original Voicebot
+    // surface is a chat, not two independent columns: one message occupies
+    // each row and older rows leave through the top as the stream grows.
+    const visible = /** @type {HTMLElement[]} */ ([...this._bubbleStack.querySelectorAll(".bubble:not(.out)")]);
+    if (visible.length > 8) {
       this._dismissBubble(visible.find((b) => b !== this._activeUserBubble) ?? visible[0]);
     }
     requestAnimationFrame(() => el.classList.add("in"));
