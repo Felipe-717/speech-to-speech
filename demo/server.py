@@ -7,11 +7,13 @@ can't hold a secret the front-end uses. This server fixes that: it serves the
 unchanged front-end AND exposes a same-origin `/api/search` proxy that holds the
 Serper key server-side (see docs/adr/0001).
 
-Everything lives in one container; the speech-to-speech backend stays a separate,
-load-balanced service the browser talks to over WebSocket as before. The load
-balancer's address is a secret too (like the Serper key): the browser never sees
-it. `/api/session` proxies the session handshake server-side so only the
-per-session compute URL the LB hands back (which the browser must dial) is exposed.
+Everything lives in one container; the speech-to-speech backend can stay a
+separate process. For RunPod, ``SPEECH_TO_SPEECH_INTERNAL_URL`` enables a
+same-origin WebSocket proxy so the browser only needs the demo's public HTTP
+port. The load-balancer's address is a secret too (like the Serper key): the
+browser never sees it. `/api/session` proxies the session handshake server-side
+so only the per-session compute URL the LB hands back (which the browser must
+dial) is exposed.
 
 On the deployed Space the server also meters conversation time by HF login tier
 (anonymous / signed-in / PRO) — see `limiter.py` and `auth.py`. That whole feature
@@ -50,7 +52,8 @@ from urllib.parse import urlsplit, urlunsplit
 import auth
 import httpx
 import limiter
-from fastapi import FastAPI, HTTPException, Request, Response
+import websockets
+from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -72,6 +75,10 @@ LOAD_BALANCER_URL = os.environ.get("LOAD_BALANCER_URL", "").strip()
 SPEECH_TO_SPEECH_URL = os.environ.get("SPEECH_TO_SPEECH_URL", "").strip()
 if SPEECH_TO_SPEECH_URL:
     LOAD_BALANCER_URL = ""
+# Optional private URL used by the same-origin WebSocket bridge. When set, the
+# browser never sees the backend address and only the demo's HTTP port needs to
+# be exposed publicly (useful on RunPod).
+SPEECH_TO_SPEECH_INTERNAL_URL = os.environ.get("SPEECH_TO_SPEECH_INTERNAL_URL", "").strip()
 # HF injects SPACE_ID ("owner/space") into every Space runtime; it's absent
 # locally and on a plain `docker run`. We meter conversation time ONLY on the
 # deployed Space — i.e. when BOTH the LB is configured AND we're on a Space.
@@ -197,7 +204,9 @@ def config():
         "allowDirect": not LOAD_BALANCER_URL,
         # Deploy-pinned direct s2s URL (empty when unset). Not a secret: the
         # browser dials it itself, and Settings shows it locked.
-        "s2sUrl": SPEECH_TO_SPEECH_URL,
+        # Keep an internal URL server-side. The reused Voicebot UI falls back
+        # to the same-origin /v1/realtime route when this is empty.
+        "s2sUrl": "" if SPEECH_TO_SPEECH_INTERNAL_URL else SPEECH_TO_SPEECH_URL,
         # WebRTC transport availability: the /api/calls proxy only forwards to
         # the env-pinned URL (never a client-supplied one), so the toggle is
         # offered exactly when that URL exists.
@@ -206,6 +215,64 @@ def config():
         "startupGreeting": STARTUP_GREETING,
         "auth": AUTH_ENABLED,
     }
+
+
+def _normalise_realtime_url(value: str) -> str:
+    """Return a WebSocket URL ending in /v1/realtime."""
+    value = value.strip()
+    if value.startswith("http://"):
+        value = "ws://" + value[7:]
+    elif value.startswith("https://"):
+        value = "wss://" + value[8:]
+    if "/v1/realtime" not in value:
+        value = value.rstrip("/") + "/v1/realtime"
+    return value
+
+
+@app.websocket("/v1/realtime")
+async def realtime_proxy(client: WebSocket):
+    """Proxy Realtime frames to a private backend on the same Pod."""
+    target = SPEECH_TO_SPEECH_INTERNAL_URL
+    if not target:
+        await client.close(code=1013, reason="Realtime proxy is not configured")
+        return
+    await client.accept()
+    try:
+        async with websockets.connect(_normalise_realtime_url(target), max_size=None) as upstream:
+            async def browser_to_backend():
+                while True:
+                    message = await client.receive()
+                    if message.get("type") == "websocket.disconnect":
+                        return
+                    if message.get("text") is not None:
+                        await upstream.send(message["text"])
+                    elif message.get("bytes") is not None:
+                        await upstream.send(message["bytes"])
+
+            async def backend_to_browser():
+                async for message in upstream:
+                    if isinstance(message, bytes):
+                        await client.send_bytes(message)
+                    else:
+                        await client.send_text(message)
+
+            tasks = {
+                asyncio.create_task(browser_to_backend()),
+                asyncio.create_task(backend_to_browser()),
+            }
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+            for task in done:
+                task.result()
+    except (WebSocketDisconnect, websockets.ConnectionClosed):
+        pass
+    except Exception as exc:
+        logger.warning("Realtime proxy failed: %r", exc)
+        if client.client_state.name != "DISCONNECTED":
+            await client.close(code=1011, reason="Realtime backend unavailable")
 
 
 @app.get("/api/me")

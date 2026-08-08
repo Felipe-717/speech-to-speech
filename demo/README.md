@@ -31,10 +31,13 @@ The first paid RunPod test should validate only this vertical slice:
 4. Server VAD closes the turn and streams Serena audio plus transcripts.
 
 The current fork does not yet claim that RAG or the Gemma GGUF model is wired.
-The repo has local `transformers` and remote OpenAI-compatible LLM backends, but
-no native `vllm` selector; Gemma GGUF should therefore be exposed later as an
-OpenAI-compatible vLLM endpoint and selected with `--llm_backend
-chat-completions` after the audio path is proven.
+The first RunPod plan serves that GGUF through its model-card-supported
+`llama-server` OpenAI-compatible endpoint and selects it with
+`--llm_backend chat-completions`; vLLM remains a later optimization because
+GGUF support is still an experimental path in vLLM.
+
+For the paid first boot, follow [`docs/runpod-first-boot.md`](../docs/runpod-first-boot.md);
+it uses the demo's same-origin WebSocket proxy so only port 7860 is public.
 
 Browser voice-chat UI for the
 [huggingface/speech-to-speech](https://github.com/huggingface/speech-to-speech)
