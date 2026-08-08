@@ -23,6 +23,26 @@ def test_rag_index_persists_text_and_metadata(tmp_path):
     assert reopened.search("encoder")
 
 
+def test_rag_documents_groups_pdf_pages(tmp_path):
+    index = rag.RagIndex(tmp_path / "rag")
+    index.add_source("/tmp/driver.pdf#page=1", "driver.pdf", "Uno dos tres")
+    index.add_source("/tmp/driver.pdf#page=2", "driver.pdf", "Cuatro cinco seis")
+    documents = index.documents()
+    assert len(documents) == 1
+    assert documents[0]["title"] == "driver.pdf"
+    assert documents[0]["pages"] == 2
+
+
+def test_document_and_activity_panels_keep_the_three_card_contract():
+    index = (DEMO_DIR / "index.html").read_text(encoding="utf-8")
+    main = (DEMO_DIR / "main.js").read_text(encoding="utf-8")
+    server = (DEMO_DIR / "server.py").read_text(encoding="utf-8")
+    assert 'id="knowledge-list"' in index
+    assert 'id="activity-list"' in index
+    assert "const PANEL_PAGE_SIZE = 3" in main
+    assert '"/api/rag/documents"' in server
+
+
 def test_rag_rejects_private_urls():
     with pytest.raises(ValueError):
         rag._extract_url("http://127.0.0.1:8000/health")

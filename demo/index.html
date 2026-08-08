@@ -92,6 +92,12 @@
               <span id="knowledge-chunks" class="knowledge-chunks">0 fragmentos</span>
             </div>
             <p id="knowledge-message">Carga PDFs para que el asistente pueda consultarlos.</p>
+            <div id="knowledge-list" class="knowledge-list" aria-label="Documentos cargados"></div>
+            <div class="panel-pager">
+              <button id="knowledge-prev" type="button" aria-label="Documentos anteriores">‹</button>
+              <span id="knowledge-page">0 / 0</span>
+              <button id="knowledge-next" type="button" aria-label="Documentos siguientes">›</button>
+            </div>
             <input id="knowledge-files" type="file" accept="application/pdf,.pdf" multiple hidden />
             <button id="knowledge-upload" class="knowledge-upload" type="button">Cargar PDFs</button>
           </section>
@@ -171,18 +177,26 @@
           <button id="text-send" class="text-send" type="submit" aria-label="Enviar mensaje" disabled><span aria-hidden="true">↑</span></button>
         </form>
 
-        <section id="task-card" class="task-card" hidden aria-live="polite">
-          <div class="task-card-head">
-            <div><span class="task-eyebrow">Tarea en segundo plano</span><h3 id="task-title">Tarea</h3></div>
-            <button id="task-cancel" class="task-cancel" type="button">Cancelar</button>
-          </div>
-          <div class="task-phase" id="task-phase">queued · queued</div>
-          <div class="task-progress-track" aria-hidden="true"><div id="task-progress" class="task-progress"></div></div>
-          <p id="task-message" class="task-message"></p>
-          <div id="task-sources" class="task-sources" hidden></div>
-        </section>
-
         <aside class="legacy-side legacy-right" aria-label="Pipeline de respuesta">
+          <section class="activity-panel" aria-label="Actividad de herramientas">
+            <div class="activity-panel-head"><span class="knowledge-eyebrow">Herramientas</span><span id="activity-summary" class="knowledge-chunks">Sin actividad</span></div>
+            <div id="activity-list" class="activity-list"></div>
+            <div class="panel-pager">
+              <button id="activity-prev" type="button" aria-label="Herramientas anteriores">‹</button>
+              <span id="activity-page">0 / 0</span>
+              <button id="activity-next" type="button" aria-label="Herramientas siguientes">›</button>
+            </div>
+          </section>
+          <section id="task-card" class="task-card" hidden aria-live="polite">
+            <div class="task-card-head">
+              <div><span class="task-eyebrow">Tarea en segundo plano</span><h3 id="task-title">Tarea</h3></div>
+              <button id="task-cancel" class="task-cancel" type="button">Cancelar</button>
+            </div>
+            <div class="task-phase" id="task-phase">queued · queued</div>
+            <div class="task-progress-track" aria-hidden="true"><div id="task-progress" class="task-progress"></div></div>
+            <p id="task-message" class="task-message"></p>
+            <div id="task-sources" class="task-sources" hidden></div>
+          </section>
           <section class="tarjeta-fija">
             <h2 class="etiqueta">Pipeline de voz</h2>
             <p class="titulo-dato">Voz clonada · Qwen3-TTS</p>

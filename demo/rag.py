@@ -280,6 +280,41 @@ class RagIndex:
             )
         return {"db": str(self.db_path), "sources": sources, "documents": documents, "chunks": chunks}
 
+    def documents(self) -> list[dict[str, object]]:
+        """Return one inventory row per uploaded document, newest first."""
+        document_expr = """
+            CASE
+                WHEN instr(s.source, '#page=') > 0
+                THEN substr(s.source, 1, instr(s.source, '#page=') - 1)
+                ELSE s.source
+            END
+        """
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT {document_expr} AS source,
+                       MAX(s.title) AS title,
+                       MAX(s.indexed_at) AS indexed_at,
+                       COUNT(DISTINCT s.id) AS pages,
+                       COUNT(c.id) AS chunks
+                FROM sources s
+                LEFT JOIN chunks c ON c.source_id = s.id
+                GROUP BY {document_expr}
+                ORDER BY indexed_at DESC, title COLLATE NOCASE ASC
+                """
+            ).fetchall()
+        return [
+            {
+                "source": row["source"],
+                "title": row["title"] or Path(str(row["source"])).name,
+                "indexed_at": row["indexed_at"],
+                "pages": int(row["pages"]),
+                "chunks": int(row["chunks"]),
+                "kind": "pdf" if str(row["source"]).lower().endswith(".pdf") else "document",
+            }
+            for row in rows
+        ]
+
     def rebuild(self) -> dict[str, int | str]:
         with self._connect() as conn:
             conn.execute("DELETE FROM chunks_fts")

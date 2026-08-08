@@ -364,6 +364,12 @@ async def rag_search(req: RagSearchRequest):
     return JSONResponse({"query": query, "results": results})
 
 
+@app.get("/api/rag/documents")
+async def rag_documents():
+    """Small inventory consumed by the paginated document panel."""
+    return JSONResponse({"documents": await asyncio.to_thread(rag_index.documents)})
+
+
 @app.post("/api/rag/upload")
 async def rag_upload(files: list[UploadFile] = File(...)):
     """Persist uploaded PDFs in the knowledge volume and index them immediately."""

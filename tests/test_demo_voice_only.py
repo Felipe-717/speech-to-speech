@@ -33,3 +33,14 @@ def test_front_uses_the_direct_websocket_transport():
     main = (REPO_ROOT / "demo" / "main.js").read_text(encoding="utf-8")
     assert 'const transport = "ws"' in main
     assert 'tools: VOICE_ONLY_DEMO ? [] : activeToolDefs()' in main
+
+
+def test_front_hides_internal_gemma_text_and_disables_vad_interruptions():
+    main = (REPO_ROOT / "demo" / "main.js").read_text(encoding="utf-8")
+    ws = (REPO_ROOT / "demo" / "ws" / "s2s-ws-client.js").read_text(encoding="utf-8")
+    rtc = (REPO_ROOT / "demo" / "rtc" / "s2s-rtc-client.js").read_text(encoding="utf-8")
+
+    assert "function stripInternalModelText" in main
+    assert "toolBatches" in main
+    assert "const INTERRUPT_RESPONSE = false" in ws
+    assert "const INTERRUPT_RESPONSE = false" in rtc

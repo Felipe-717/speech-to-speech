@@ -74,6 +74,7 @@ const ICE_GATHERING_TIMEOUT_MS = 3_000;
 const SPEAKING_OPEN_DB = -50;
 const SPEAKING_HANG_MS = 250;
 const LEVEL_POLL_MS = 50;
+const INTERRUPT_RESPONSE = false;
 
 /** Build an Error carrying a `code` so callers can branch on the failure kind.
  *  @param {string} message @param {string} code */
@@ -469,16 +470,15 @@ export class S2sRtcRealtimeClient extends EventTarget {
         break;
 
       case "input_audio_buffer.speech_started":
-        // Barge-in: unlike WS there is no client playback buffer to clear —
-        // the server flushes its track buffer — so this is UI state only.
-        this._aiSpeaking = false;
-        this._lastAudibleAt = 0;
+        // With interrupt_response disabled this is not a barge-in: preserve an
+        // active response and use the signal only for user-turn UI state.
+        const responseWasAudible = this._aiSpeaking || this._status === "ai-speaking";
         this.dispatchEvent(new CustomEvent("user-turn-started", {
           detail: {
             itemId: typeof event.item_id === "string" ? event.item_id : "",
           },
         }));
-        this._setStatus("user-speaking");
+        if (!responseWasAudible) this._setStatus("user-speaking");
         break;
 
       case "input_audio_buffer.speech_stopped":
@@ -538,7 +538,7 @@ export class S2sRtcRealtimeClient extends EventTarget {
         const callId = typeof event.call_id === "string" ? event.call_id : "";
         if (name) {
           this.dispatchEvent(new CustomEvent("toolcall", {
-            detail: { name, arguments: args, callId },
+            detail: { name, arguments: args, callId, responseId: event.response_id ?? event.response?.id ?? "" },
           }));
         } else {
           console.warn(`[rtc] function_call_arguments.done with no name (call_id=${callId}); cannot run tool — turn may stall`);
@@ -679,13 +679,14 @@ export class S2sRtcRealtimeClient extends EventTarget {
   }
 
   _sendSessionUpdate() {
-    // Minimal payload, exactly like the WS client: the server's pydantic
-    // validator rejects the whole event on unknown sub-field shapes.
+    // Minimal payload, exactly like the WS client. The explicit VAD policy
+    // keeps ambient speech from interrupting replies or tool workflows.
     /** @type {Record<string, any>} */
     const session = {
       type: "realtime",
       instructions: this.options.instructions,
       audio: {
+        input: { turn_detection: { type: "server_vad", interrupt_response: INTERRUPT_RESPONSE } },
         output: { voice: this.options.voice },
       },
     };

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from collections.abc import Iterator
 from typing import Any, cast
@@ -41,14 +42,15 @@ logger = logging.getLogger(__name__)
 
 _GEMMA_THOUGHT_MARKER = "<|channel>thought"
 _GEMMA_CHANNEL_END = "<channel|>"
+_GEMMA_THOUGHT_BLOCK = re.compile(
+    re.escape(_GEMMA_THOUGHT_MARKER) + r".*?" + re.escape(_GEMMA_CHANNEL_END),
+    re.DOTALL,
+)
 
 
 def _clean_model_text(text: str) -> str:
-    """Remove Gemma 4's empty thought-channel prefix from final text."""
-    marker_end = text.find(_GEMMA_CHANNEL_END, len(_GEMMA_THOUGHT_MARKER))
-    if text.startswith(_GEMMA_THOUGHT_MARKER) and marker_end >= 0:
-        return text[marker_end + len(_GEMMA_CHANNEL_END) :]
-    return text
+    """Remove every Gemma 4 thought channel from model-visible output."""
+    return _GEMMA_THOUGHT_BLOCK.sub("", text).strip()
 
 
 def _to_chat_tools(req_tools: Any) -> list[ChatCompletionToolParam] | None:
@@ -215,31 +217,44 @@ def _iter_chat_stream_events(api_response: Stream[ChatCompletionChunk]) -> Itera
     tool_accum: dict[int, dict[str, str]] = {}
     usage: Usage | None = None
     raw_text = ""
-    pending_prefix = ""
-    thought_prefix_removed = False
+    pending = ""
+    inside_thought = False
 
     def clean_stream_piece(piece: str) -> str:
-        """Strip Gemma's channel prefix without leaking split marker chunks."""
-        nonlocal pending_prefix, thought_prefix_removed
-        if thought_prefix_removed:
-            return piece
+        """Strip thought channels even when a marker is split across chunks."""
+        nonlocal pending, inside_thought
+        pending += piece
+        visible = ""
+        while pending:
+            if inside_thought:
+                end = pending.find(_GEMMA_CHANNEL_END)
+                if end < 0:
+                    # Keep only enough suffix to recognise a split end marker.
+                    keep = max(0, len(_GEMMA_CHANNEL_END) - 1)
+                    pending = pending[-keep:] if keep else ""
+                    break
+                pending = pending[end + len(_GEMMA_CHANNEL_END) :]
+                inside_thought = False
+                continue
 
-        candidate = pending_prefix + piece
-        if candidate.startswith(_GEMMA_THOUGHT_MARKER):
-            marker_end = candidate.find(_GEMMA_CHANNEL_END, len(_GEMMA_THOUGHT_MARKER))
-            if marker_end < 0:
-                pending_prefix = candidate
-                return ""
-            thought_prefix_removed = True
-            pending_prefix = ""
-            return candidate[marker_end + len(_GEMMA_CHANNEL_END) :]
+            start = pending.find(_GEMMA_THOUGHT_MARKER)
+            if start >= 0:
+                visible += pending[:start]
+                pending = pending[start + len(_GEMMA_THOUGHT_MARKER) :]
+                inside_thought = True
+                continue
 
-        if _GEMMA_THOUGHT_MARKER.startswith(candidate):
-            pending_prefix = candidate
-            return ""
-
-        pending_prefix = ""
-        return candidate
+            # Do not emit a suffix that could become a marker with the next chunk.
+            max_prefix = min(len(pending), len(_GEMMA_THOUGHT_MARKER) - 1)
+            keep = 0
+            for size in range(max_prefix, 0, -1):
+                if _GEMMA_THOUGHT_MARKER.startswith(pending[-size:]):
+                    keep = size
+                    break
+            visible += pending[:-keep] if keep else pending
+            pending = pending[-keep:] if keep else ""
+            break
+        return visible
 
     for chunk in api_response:
         if chunk.usage is not None:
@@ -267,9 +282,12 @@ def _iter_chat_stream_events(api_response: Stream[ChatCompletionChunk]) -> Itera
                 raw_text += cleaned_piece
                 yield TextDelta(text=cleaned_piece)
 
-    if pending_prefix:
-        raw_text += pending_prefix
-        yield TextDelta(text=pending_prefix)
+    # An unfinished thought channel is internal model text, never user output.
+    if pending and not inside_thought:
+        visible = _clean_model_text(pending)
+        if visible:
+            raw_text += visible
+            yield TextDelta(text=visible)
 
     if raw_text.strip():
         yield AssistantMessage(content=[AssistantContent(type="output_text", text=raw_text)])

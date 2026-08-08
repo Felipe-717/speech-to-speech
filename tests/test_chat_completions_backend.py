@@ -31,6 +31,7 @@ from speech_to_speech.api.openai_realtime.runtime_config import RuntimeConfig
 from speech_to_speech.LLM.chat import Chat, make_user_audio_message, make_user_message
 from speech_to_speech.LLM.chat_completions_language_model import (
     ChatCompletionsApiModelHandler,
+    _clean_model_text,
     _to_chat_tool_choice,
     _to_chat_tools,
 )
@@ -61,6 +62,25 @@ class _FakeStream:
 # stream. Non-streaming fakes stay plain SimpleNamespace, so they still take the
 # non-stream branch.
 ccm.Stream = _FakeStream
+
+
+def test_clean_model_text_removes_gemma_thought_channel():
+    assert _clean_model_text("<|channel>thought\n<channel|>Respuesta") == "Respuesta"
+    assert _clean_model_text("<|channel>thought<channel|>") == ""
+
+
+def test_streaming_thought_only_tool_call_does_not_emit_assistant_text():
+    events = list(
+        ccm._iter_chat_stream_events(
+            _FakeStream([
+                _chunk(content="<|channel>thought"),
+                _chunk(content="\n<channel|>", tool_calls=[_tc_delta(0, id="x", name="search", arguments='{"q":"x"}')]),
+                _chunk(tool_calls=[_tc_delta(0, arguments="}")]),
+            ])
+        )
+    )
+    assert not [event for event in events if getattr(event, "text", None)]
+    assert any(getattr(event, "item", None) and event.item.name == "search" for event in events)
 
 
 class _FakeCompletions:

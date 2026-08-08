@@ -44,6 +44,12 @@ const TOOL_USE_HINT =
   "right away in the same response. Para tareas largas usa start_background_task; " +
   "para documentos usa knowledge_search; para el progreso usa get_task_status.";
 
+function stripInternalModelText(text) {
+  return String(text || "")
+    .replace(/<\|channel>thought[\s\S]*?<channel\|>/g, "")
+    .trim();
+}
+
 const STORAGE_KEYS = {
   // Direct s2s server URL, used only when the deploy has no LOAD_BALANCER_URL
   // (in LB mode the browser never learns the LB address — it POSTs /api/session).
@@ -348,6 +354,33 @@ const knowledgeMessage = $("#knowledge-message");
 const knowledgeFiles = $("#knowledge-files");
 /** @type {HTMLButtonElement} */
 const knowledgeUpload = $("#knowledge-upload");
+/** @type {HTMLElement} */
+const knowledgeList = $("#knowledge-list");
+/** @type {HTMLButtonElement} */
+const knowledgePrev = $("#knowledge-prev");
+/** @type {HTMLButtonElement} */
+const knowledgeNext = $("#knowledge-next");
+/** @type {HTMLElement} */
+const knowledgePage = $("#knowledge-page");
+/** @type {HTMLElement} */
+const activityList = $("#activity-list");
+/** @type {HTMLElement} */
+const activitySummary = $("#activity-summary");
+/** @type {HTMLButtonElement} */
+const activityPrev = $("#activity-prev");
+/** @type {HTMLButtonElement} */
+const activityNext = $("#activity-next");
+/** @type {HTMLElement} */
+const activityPage = $("#activity-page");
+
+const PANEL_PAGE_SIZE = 3;
+let knowledgeDocuments = [];
+let knowledgePageIndex = 0;
+let toolActivity = [];
+let activityPageIndex = 0;
+/** @type {Map<string, { pending: number, closed: boolean, requested: boolean, jobs: Map<string, Promise<{ output: string, image?: string }>>, image?: string }>} */
+const toolBatches = new Map();
+const finishedResponseIds = new Set();
 
 /** @type {HTMLInputElement} */
 const inputLbUrl = $("#lb-url");
@@ -1006,13 +1039,6 @@ function flashPreview() {
 // response so the model speaks it. Errors come back as the tool output too, so
 // the model can recover gracefully instead of the turn stalling.
 
-/**
- * Run the function the model called, return its result to the backend, and ask
- * for a follow-up response. We also hand the result back to the caller so it
- * can be shown in the conversation once the tool has actually run.
- * @param {string} name @param {string} argsJson @param {string} callId
- * @returns {Promise<{ output: string, image?: string }>}
- */
 function taskStatusInstruction() {
   if (!activeTask) return "";
   return [
@@ -1073,6 +1099,26 @@ function renderTask(task) {
   taskCancel.hidden = !["queued", "running"].includes(task.status);
   taskCard.classList.toggle("task-complete", task.status === "completed");
   taskCard.classList.toggle("task-error", task.status === "failed");
+  const phases = ["planning", "retrieving", "searching_web", "reading_sources", "synthesizing", "finalizing"];
+  const phaseIndex = Math.max(0, phases.indexOf(task.phase));
+  let activity = toolActivity.find((entry) => entry.taskId === task.task_id);
+  if (!activity) {
+    // Reuse the provisional activity created by the tool call, then attach its
+    // durable task id once the server has accepted the job.
+    activity = toolActivity.find((entry) => entry.name === "start_background_task" && !entry.taskId && entry.status === "running");
+    if (activity) activity.taskId = task.task_id;
+    else {
+      activity = { taskId: task.task_id, name: "start_background_task", label: "Tarea en segundo plano", detail: "", status: "running" };
+      toolActivity.unshift(activity);
+    }
+  }
+  activity.status = task.status === "failed" ? "error" : task.status === "cancelled" ? "error" : task.status === "completed" ? "complete" : "running";
+  activity.detail = task.goal || "Tarea en segundo plano";
+  activity.steps = phases.map((phase, index) => ({
+    label: ({ planning: "Planificación", retrieving: "RAG", searching_web: "Web", reading_sources: "Lectura", synthesizing: "Síntesis", finalizing: "Finalización" })[phase] || phase,
+    state: task.status === "completed" || index < phaseIndex ? "complete" : index === phaseIndex && task.status === "running" ? "active" : "pending",
+  }));
+  renderToolActivity();
   updateTaskContext();
 }
 
@@ -1127,8 +1173,11 @@ async function execKnowledgeSearch(query) {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.detail || `RAG error (${res.status})`);
-  if (!data.results?.length) return "No hay fragmentos relevantes en el RAG local.";
-  return data.results.map((item) => `- ${item.title || item.source}: ${item.text} (${item.source})`).join("\n");
+  if (!data.results?.length) return "RESULTADO_RAG: sin fragmentos relevantes.";
+  return [
+    `RESULTADO_RAG: ${data.results.length} fragmentos relevantes.`,
+    ...data.results.map((item) => `- ${item.title || item.source}: ${String(item.text || "").slice(0, 650)} (${item.source})`),
+  ].join("\n");
 }
 
 function renderKnowledgeStatus(status) {
@@ -1137,6 +1186,94 @@ function renderKnowledgeStatus(status) {
   knowledgeCount.textContent = `${documents} documento${documents === 1 ? "" : "s"}`;
   knowledgeChunks.textContent = `${chunks} fragmento${chunks === 1 ? "" : "s"}`;
 }
+
+function renderKnowledgeDocuments() {
+  const pages = Math.max(1, Math.ceil(knowledgeDocuments.length / PANEL_PAGE_SIZE));
+  knowledgePageIndex = Math.min(knowledgePageIndex, pages - 1);
+  const start = knowledgePageIndex * PANEL_PAGE_SIZE;
+  knowledgeList.replaceChildren();
+  for (const doc of knowledgeDocuments.slice(start, start + PANEL_PAGE_SIZE)) {
+    const el = document.createElement("article");
+    el.className = "document-item";
+    const date = typeof doc.indexed_at === "string" ? new Date(doc.indexed_at).toLocaleDateString() : "";
+    el.innerHTML = `<span class="document-icon" aria-hidden="true">PDF</span><span class="document-copy"><strong></strong><small></small></span>`;
+    el.querySelector("strong").textContent = String(doc.title || "Documento PDF");
+    el.querySelector("small").textContent = `${Number(doc.chunks || 0)} fragmentos${date ? ` · ${date}` : ""}`;
+    knowledgeList.append(el);
+  }
+  if (!knowledgeDocuments.length) knowledgeList.innerHTML = '<p class="panel-empty">Aún no hay PDFs cargados.</p>';
+  knowledgePage.textContent = knowledgeDocuments.length ? `${knowledgePageIndex + 1} / ${pages}` : "0 / 0";
+  knowledgePrev.disabled = knowledgePageIndex === 0;
+  knowledgeNext.disabled = knowledgePageIndex >= pages - 1;
+}
+
+async function refreshKnowledgeDocuments() {
+  const res = await fetch("api/rag/documents");
+  if (!res.ok) return;
+  const data = await res.json();
+  knowledgeDocuments = Array.isArray(data.documents) ? data.documents : [];
+  renderKnowledgeDocuments();
+}
+
+function renderToolActivity() {
+  const pages = Math.max(1, Math.ceil(toolActivity.length / PANEL_PAGE_SIZE));
+  activityPageIndex = Math.min(activityPageIndex, pages - 1);
+  const start = activityPageIndex * PANEL_PAGE_SIZE;
+  activityList.replaceChildren();
+  for (const entry of toolActivity.slice(start, start + PANEL_PAGE_SIZE)) {
+    const el = document.createElement("article");
+    el.className = `activity-item ${entry.status}${entry.steps ? " activity-task" : ""}`;
+    const state = entry.status === "running" ? "…" : entry.status === "error" ? "×" : entry.status === "empty" ? "–" : "✓";
+    el.innerHTML = `<span class="activity-state" aria-hidden="true">${state}</span><span class="activity-copy"><strong></strong><small></small></span>`;
+    el.querySelector("strong").textContent = entry.label;
+    el.querySelector("small").textContent = entry.detail;
+    if (Array.isArray(entry.steps)) {
+      const checklist = document.createElement("ul");
+      checklist.className = "activity-checklist";
+      for (const step of entry.steps) {
+        const item = document.createElement("li");
+        item.className = step.state;
+        item.textContent = `${step.state === "complete" ? "✓" : step.state === "active" ? "…" : "○"} ${step.label}`;
+        checklist.append(item);
+      }
+      el.querySelector(".activity-copy").append(checklist);
+    }
+    activityList.append(el);
+  }
+  if (!toolActivity.length) activityList.innerHTML = '<p class="panel-empty">Las acciones aparecerán aquí.</p>';
+  activitySummary.textContent = toolActivity.length ? `${toolActivity.length} en sesión` : "Sin actividad";
+  activityPage.textContent = toolActivity.length ? `${activityPageIndex + 1} / ${pages}` : "0 / 0";
+  activityPrev.disabled = activityPageIndex === 0;
+  activityNext.disabled = activityPageIndex >= pages - 1;
+}
+
+function toolLabel(name) {
+  return ({ knowledge_search: "Consulta documental", web_search: "Búsqueda web", start_background_task: "Tarea en segundo plano", get_task_status: "Estado de tarea", cancel_background_task: "Cancelar tarea" })[name] || name;
+}
+
+function startToolActivity(name, argsJson, key) {
+  let args = {};
+  try { args = JSON.parse(argsJson || "{}"); } catch {}
+  const detail = String(args.query || args.goal || "Ejecutando");
+  const entry = { name, label: toolLabel(name), detail, status: "running", key };
+  toolActivity.unshift(entry);
+  activityPageIndex = 0;
+  renderToolActivity();
+  return entry;
+}
+
+function finishToolActivity(entry, output) {
+  entry.status = /^Tool failed:/i.test(output) ? "error" : /RESULTADO_(?:RAG|WEB): sin resultados/i.test(output) ? "empty" : "complete";
+  entry.detail = entry.status === "error" ? output.replace(/^Tool failed:\s*/i, "") : output.split("\n")[0].slice(0, 120);
+  renderToolActivity();
+}
+
+knowledgePrev.addEventListener("click", () => { knowledgePageIndex--; renderKnowledgeDocuments(); });
+knowledgeNext.addEventListener("click", () => { knowledgePageIndex++; renderKnowledgeDocuments(); });
+activityPrev.addEventListener("click", () => { activityPageIndex--; renderToolActivity(); });
+activityNext.addEventListener("click", () => { activityPageIndex++; renderToolActivity(); });
+renderKnowledgeDocuments();
+renderToolActivity();
 
 async function uploadKnowledgePdfs(files) {
   if (!files.length) return;
@@ -1150,6 +1287,7 @@ async function uploadKnowledgePdfs(files) {
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.detail || `Error al cargar (${response.status})`);
     renderKnowledgeStatus(data.rag);
+    await refreshKnowledgeDocuments();
     const uploaded = Array.isArray(data.uploaded) ? data.uploaded.length : 0;
     const errors = Array.isArray(data.errors) ? data.errors : [];
     knowledgeMessage.textContent = errors.length
@@ -1169,66 +1307,67 @@ knowledgeFiles.addEventListener("change", () => {
   void uploadKnowledgePdfs(Array.from(knowledgeFiles.files || []));
 });
 
-async function runTool(name, argsJson, callId) {
-  if (!client) return { output: "" };
+function stableToolArgs(argsJson) {
+  try {
+    const args = JSON.parse(argsJson || "{}");
+    return JSON.stringify(args, Object.keys(args).sort());
+  } catch {
+    return String(argsJson || "{}");
+  }
+}
+
+/** Execute a tool once. Returning its result is deliberately separate from
+ * sending the output and response.create so a response's full tool batch can
+ * be completed before Gemma is asked for one final answer. */
+async function executeTool(name, argsJson) {
   let args = /** @type {Record<string, unknown>} */ ({});
   try { args = JSON.parse(argsJson || "{}"); } catch { /* keep {} */ }
+  if (name === "web_search") {
+    return { output: await execWebSearch(typeof args.query === "string" ? args.query : "") };
+  }
+  if (name === "knowledge_search") {
+    return { output: await execKnowledgeSearch(typeof args.query === "string" ? args.query : "") };
+  }
+  if (name === "start_background_task") {
+    return { output: await createBackgroundTask(typeof args.goal === "string" ? args.goal : "") };
+  }
+  if (name === "get_task_status") return { output: await currentTaskStatus() };
+  if (name === "cancel_background_task") return { output: await cancelBackgroundTask() };
+  if (name === "camera_snapshot") {
+    const dataUrl = captureSnapshot();
+    if (!dataUrl) return { output: "The camera is not available right now." };
+    flashPreview();
+    return { output: "Snapshot captured from the webcam and attached as an image.", image: dataUrl };
+  }
+  return { output: `Unknown tool: ${name}` };
+}
 
+function requestToolBatchFollowup(batchKey) {
+  const batch = toolBatches.get(batchKey);
+  if (!batch || !batch.closed || batch.pending || batch.requested || !client) return;
+  batch.requested = true;
+  if (DEBUG) console.debug(`[tool] requesting final model response for ${batchKey}`);
+  client.requestResponse({ ...(batch.image ? { image: batch.image } : {}), instructions: taskStatusInstruction() });
+  // Keep the grouping object briefly so duplicate late events cannot issue a
+  // second response, then release it for the rest of the session.
+  setTimeout(() => toolBatches.delete(batchKey), 10_000);
+}
+
+async function runTool(batchKey, name, argsJson, callId) {
+  if (!client) return { output: "" };
+  const batch = toolBatches.get(batchKey);
+  if (!batch) return { output: "" };
   if (DEBUG) console.debug(`[tool] run name=${name} callId=${JSON.stringify(callId)} args=${argsJson}`);
   if (!callId) console.warn("[tool] empty call_id — the backend didn't tag the call, can't return a function_call_output");
-
-  /** @type {{ output: string, image?: string }} */
-  let result = { output: "" };
-  try {
-    if (name === "web_search") {
-      const query = typeof args.query === "string" ? args.query : "";
-      result.output = await execWebSearch(query);
-      // Return the result and let the bare response.create (below) trigger the
-      // spoken answer.
-      client.sendToolOutput(callId, result.output);
-    } else if (name === "knowledge_search") {
-      result.output = await execKnowledgeSearch(typeof args.query === "string" ? args.query : "");
-      client.sendToolOutput(callId, result.output);
-    } else if (name === "start_background_task") {
-      result.output = await createBackgroundTask(typeof args.goal === "string" ? args.goal : "");
-      client.sendToolOutput(callId, result.output);
-    } else if (name === "get_task_status") {
-      result.output = await currentTaskStatus();
-      client.sendToolOutput(callId, result.output);
-    } else if (name === "cancel_background_task") {
-      result.output = await cancelBackgroundTask();
-      client.sendToolOutput(callId, result.output);
-    } else if (name === "camera_snapshot") {
-      const dataUrl = captureSnapshot();
-      if (dataUrl) {
-        if (DEBUG) console.debug(`[tool] camera_snapshot captured frame (${dataUrl.length} chars), sending image + output`);
-        result = { output: "Snapshot captured from the webcam and attached as an image.", image: dataUrl };
-        // Return the tool output; the frame itself rides along with the
-        // response.create below (sent right before it), so the model sees the
-        // snapshot in the very response it's about to speak.
-        client.sendToolOutput(callId, result.output);
-        flashPreview();
-      } else {
-        console.warn("[tool] camera_snapshot: no frame — camera off or not ready");
-        result.output = "The camera is not available right now.";
-        client.sendToolOutput(callId, result.output);
-      }
-    } else {
-      result.output = `Unknown tool: ${name}`;
-      client.sendToolOutput(callId, result.output);
-    }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    result.output = `Tool failed: ${msg}`;
-    client.sendToolOutput(callId, result.output);
+  const key = `${name}:${stableToolArgs(argsJson)}`;
+  let job = batch.jobs.get(key);
+  if (!job) {
+    job = executeTool(name, argsJson).catch((err) => ({ output: `Tool failed: ${err instanceof Error ? err.message : String(err)}` }));
+    batch.jobs.set(key, job);
   }
-  if (DEBUG) console.debug(`[tool] requesting model response after ${name}`);
-  // Camera: the captured frame rides with the response.create (sent just before
-  // it) so it's in context for the reply. Other tools: a bare create.
-  client.requestResponse({
-    ...(result.image ? { image: result.image } : {}),
-    instructions: taskStatusInstruction(),
-  });
+  const result = await job;
+  if (result.image) batch.image = result.image;
+  client.sendToolOutput(callId, result.output);
   return result;
 }
 
@@ -1243,7 +1382,7 @@ async function execWebSearch(query) {
   if (!res.ok) {
     let detail = String(res.status);
     try { const j = await res.json(); if (j.detail) detail = j.detail; } catch {}
-    throw new Error(`search error (${detail})`);
+    throw new Error(`Búsqueda web no disponible temporalmente (${detail})`);
   }
   const json = await res.json();
   /** @type {string[]} */
@@ -1251,7 +1390,7 @@ async function execWebSearch(query) {
   for (const r of json.results || []) {
     lines.push(`- ${r.title}: ${r.snippet} (${r.url})`);
   }
-  return lines.length > 1 ? lines.join("\n") : `${lines[0]}\nNo results found.`;
+  return lines.length > 1 ? `RESULTADO_WEB: ${lines.join("\n")}` : "RESULTADO_WEB: sin resultados.";
 }
 
 /** Learn server config (search key + connection target), then refresh the UI. */
@@ -1262,6 +1401,7 @@ async function fetchConfig() {
       const json = await res.json();
       serverSearchKey = !!json.search;
       renderKnowledgeStatus(json.rag);
+      void refreshKnowledgeDocuments();
       lbMode = !!json.lb;
       // Lock to LB mode only when the deploy reports a load balancer.
       allowDirect = json.allowDirect ?? !lbMode;
@@ -1877,6 +2017,10 @@ async function doStart(audioContext = null) {
   });
   c.addEventListener("transcript", (e) => {
     const d = /** @type {CustomEvent<{ role: "user" | "assistant"; text: string; partial: boolean; itemId?: string; responseId?: string }>} */ (e).detail;
+    if (d.role === "assistant") {
+      d.text = stripInternalModelText(d.text);
+      if (!d.text) return;
+    }
     chat.onTranscript(d);
   });
   c.addEventListener("user-turn-started", (e) => {
@@ -1895,16 +2039,52 @@ async function doStart(audioContext = null) {
   c.addEventListener("response-finished", (e) => {
     const detail = /** @type {CustomEvent<{ responseId: string; status: string; audible?: boolean; transcript?: string }>} */ (e).detail;
     chat.onResponseFinished(detail);
+    if (detail.responseId) {
+      finishedResponseIds.add(detail.responseId);
+      const batch = toolBatches.get(detail.responseId);
+      if (batch) {
+        batch.closed = true;
+        requestToolBatchFollowup(detail.responseId);
+      }
+    }
   });
 
   c.addEventListener("toolcall", (e) => {
-    const { name, arguments: args, callId } = /** @type {CustomEvent<{ name: string; arguments: string; callId: string }>} */ (e).detail;
-    chat.onToolCall(name);
-    // Execute the tool, then push it to the conversation once the result is in,
-    // so the toggle shows both the call input and its output together.
-    void runTool(name, args, callId).then(({ output, image }) => {
-      chat.onToolResult(name, args, output, image);
+    const { name, arguments: args, callId, responseId } = /** @type {CustomEvent<{ name: string; arguments: string; callId: string; responseId?: string }>} */ (e).detail;
+    const batchKey = responseId || `unscoped:${callId || `${name}:${Date.now()}`}`;
+    let batch = toolBatches.get(batchKey);
+    if (!batch) {
+      batch = { pending: 0, closed: !!responseId && finishedResponseIds.has(responseId), requested: false, jobs: new Map() };
+      toolBatches.set(batchKey, batch);
+    }
+    batch.pending++;
+    const activityKey = `${batchKey}:${name}:${stableToolArgs(args)}`;
+    let activity = toolActivity.find((entry) => entry.key === activityKey);
+    if (!activity) activity = startToolActivity(name, args, activityKey);
+    // Execute the tool, then expose the durable result in both the history and
+    // the right-side activity panel. Tool bubbles around the orb are avoided.
+    void runTool(batchKey, name, args, callId).then(({ output, image }) => {
+      if (activity && !activity.steps) finishToolActivity(activity, output);
+      // Duplicate calls in the same model response receive their own protocol
+      // output, but only one readable history row and one activity card.
+      if (!activity.historyAdded) {
+        activity.historyAdded = true;
+        chat.onToolResult(name, args, output, image);
+      }
+    }).finally(() => {
+      const current = toolBatches.get(batchKey);
+      if (!current) return;
+      current.pending = Math.max(0, current.pending - 1);
+      requestToolBatchFollowup(batchKey);
     });
+    // A malformed server event without response_id cannot be tied to a
+    // response.done. Close its batch on the next turn of the event loop.
+    if (!responseId) setTimeout(() => {
+      const current = toolBatches.get(batchKey);
+      if (!current) return;
+      current.closed = true;
+      requestToolBatchFollowup(batchKey);
+    }, 0);
   });
   c.addEventListener("error", (e) => {
     const detail = /** @type {CustomEvent<{ error: unknown }>} */ (e).detail;

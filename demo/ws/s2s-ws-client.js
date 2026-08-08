@@ -99,6 +99,8 @@ import {
 import { OrbVisualiser, VIS_FFT_SIZE } from "./orb-visualizer.js";
 import { SentAudioRecorder } from "./user-audio-recorder.js";
 
+const INTERRUPT_RESPONSE = false;
+
 /** Build an Error carrying a `code` (and optional extra fields) so callers can
  *  branch on the failure kind: "login-required" | "limit" | "queue-full" |
  *  "queue-expired" | "aborted".
@@ -697,13 +699,10 @@ export class S2sWsRealtimeClient extends EventTarget {
         break;
 
       case "input_audio_buffer.speech_started":
-        // User started speaking — stop any audio still playing OR queued, every
-        // time. We clear unconditionally (not just when `_aiSpeaking`): after a
-        // reply or a tool result the worklet's ring buffer can still be draining
-        // even though we already flipped `_aiSpeaking` off, and that tail would
-        // otherwise keep playing over the user's barge-in.
-        this._playbackNode?.port.postMessage({ kind: "clear" });
-        this._aiSpeaking = false;
+        // With interrupt_response disabled, incoming speech is an input signal,
+        // not a barge-in. Keep local playback and the active response intact;
+        // only reflect the user's turn when no answer is currently audible.
+        const responseWasAudible = this._aiSpeaking || this._status === "ai-speaking";
         this._userAudioRecorder.speechStarted({
           itemId: typeof event.item_id === "string" ? event.item_id : "",
           audioStartMs: Number(event.audio_start_ms),
@@ -713,7 +712,7 @@ export class S2sWsRealtimeClient extends EventTarget {
             itemId: typeof event.item_id === "string" ? event.item_id : "",
           },
         }));
-        this._setStatus("user-speaking");
+        if (!responseWasAudible) this._setStatus("user-speaking");
         break;
 
       case "input_audio_buffer.speech_stopped":
@@ -814,7 +813,7 @@ export class S2sWsRealtimeClient extends EventTarget {
         const callId = typeof event.call_id === "string" ? event.call_id : "";
         if (name) {
           this.dispatchEvent(new CustomEvent("toolcall", {
-            detail: { name, arguments: args, callId },
+            detail: { name, arguments: args, callId, responseId: event.response_id ?? event.response?.id ?? "" },
           }));
         } else {
           // A nameless call can't be executed, so no function_call_output is
@@ -972,15 +971,16 @@ export class S2sWsRealtimeClient extends EventTarget {
     // Minimal payload: only the bits the user is allowed to configure.
     // The s2s server already defaults to server_vad, whisper-1
     // transcription, 16 kHz PCM input and 24 kHz PCM output, so we don't
-    // need (and must not send) `audio.input.format`, `audio.input.transcription`,
-    // `audio.input.turn_detection` or `audio.output.format`: the pydantic
-    // validator on the server rejects the whole event if any unknown or
-    // future-shaped sub-field shows up.
+    // need (and must not send) `audio.input.format`,
+    // `audio.input.transcription` or `audio.output.format`. We do send the
+    // supported VAD interruption policy explicitly so ambient noise never
+    // cancels a reply or tool workflow.
     /** @type {Record<string, any>} */
     const session = {
       type: "realtime",
       instructions: this.options.instructions,
       audio: {
+        input: { turn_detection: { type: "server_vad", interrupt_response: INTERRUPT_RESPONSE } },
         output: { voice: this.options.voice },
       },
     };
