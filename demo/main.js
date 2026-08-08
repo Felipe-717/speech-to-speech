@@ -1047,7 +1047,7 @@ function renderTask(task) {
       ? source.title.trim()
       : (typeof source.source === "string" ? source.source : "Fuente");
     const url = typeof source.url === "string" ? source.url.trim() : "";
-    if (url && /^https?:\\/\\//i.test(url)) {
+    if (url && (url.startsWith("http://") || url.startsWith("https://"))) {
       const link = document.createElement("a");
       link.href = url;
       link.target = "_blank";
