@@ -97,10 +97,15 @@ Con el venv activo:
 ~~~bash
 if ! command -v llama >/dev/null 2>&1; then
   curl -LsSf https://llama.app/install.sh | sh
-  source /root/.local/bin/env
 fi
+export PATH="/root/.local/bin:$PATH"
 llama --help | head -n 5
 ~~~
+
+No usar `uv pip install --system`: la imagen marca `/usr` como entorno
+externamente administrado. Tampoco usar `uv venv --python /usr/local/bin/python3.12`;
+en esta imagen el ejecutable correcto es `/usr/local/bin/python` y `uv venv`
+lo encuentra automáticamente.
 
 Modelo:
 
@@ -110,7 +115,23 @@ unsloth/gemma-4-12B-it-qat-GGUF:UD-Q4_K_XL
 
 ## 7. Arrancar los procesos
 
-Usar tmux o tres sesiones SSH. Mantener el Pod encendido.
+Usar tmux para que las tres sesiones queden en el mismo SSH. Crear la sesión una
+sola vez:
+
+~~~bash
+tmux new -s voicebot
+~~~
+
+Dentro de tmux, `Ctrl+B` y luego `C` crea otra ventana; `Ctrl+B` y luego `0`,
+`1` o `2` cambia de ventana. Alternativamente, desde otra sesión SSH:
+
+~~~bash
+tmux new-window -t voicebot -n pipeline
+tmux new-window -t voicebot -n frontend
+tmux attach -t voicebot
+~~~
+
+Mantener el Pod encendido mientras se prueba.
 
 ### Terminal 1: Gemma
 
@@ -166,11 +187,24 @@ export TTS_VOICE=Serena
 uvicorn server:app --host 0.0.0.0 --port 7860
 ~~~
 
-Abrir:
+Para el navegador, preferir un túnel SSH local. En PowerShell del computador:
+
+~~~powershell
+ssh -N -L 7860:127.0.0.1:7860 -p PUERTO_SSH -i C:\Users\felip\.ssh\id_ed25519 root@IP_DEL_POD
+~~~
+
+Mantener esa ventana abierta y abrir `http://localhost:7860`. Si el puerto
+7860 local está ocupado, usar `-L 8786:127.0.0.1:7860` y abrir
+`http://localhost:8786`.
+
+El proxy público también sirve para una comprobación rápida:
 
 ~~~text
 https://POD_ID-7860.proxy.runpod.net
 ~~~
+
+Pero `localhost` es preferible para el micrófono: evita problemas de origen,
+permisos y WebSocket del proxy público.
 
 ## 8. Criterio de éxito
 
@@ -187,6 +221,16 @@ No añadir todavía RAG, cámara, clonación de voz ni cambios de modelo.
 - Con Volume Disk: detener conserva /workspace; terminar elimina el Pod.
 - Sin Volume Disk: detener o reiniciar borra repositorio, .venv, cachés y modelos.
 - Sin volumen, realizar toda la prueba en una sola sesión y terminar el Pod al acabar.
+
+Antes de detener un Pod sin volumen, confirmar que los cambios están publicados:
+
+~~~bash
+git status
+git log -1 --oneline
+~~~
+
+El código de esta demo se conserva en la rama `demo-foundation` del fork;
+el entorno, modelos y cachés locales no.
 
 ## Errores comunes
 
