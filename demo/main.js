@@ -43,8 +43,9 @@ const TOOL_USE_HINT =
   "in the same response before making any claim about its result. Never say " +
   "that you are searching, reading documents, or creating a task unless you " +
   "actually call the corresponding tool. Para tareas largas usa " +
-  "start_background_task; para documentos usa knowledge_search; para el " +
-  "progreso usa get_task_status.";
+  "start_background_task; para listar documentos usa knowledge_list_documents; " +
+  "para buscar dentro de documentos usa knowledge_search; para el progreso usa " +
+  "get_task_status.";
 
 function stripInternalModelText(text) {
   return String(text || "")
@@ -113,6 +114,12 @@ const TOOL_DEFS = {
       properties: { query: { type: "string", description: "La consulta para el índice local." } },
       required: ["query"],
     },
+  },
+  knowledge_list_documents: {
+    type: "function",
+    name: "knowledge_list_documents",
+    description: "Lista los documentos cargados en el RAG local, con títulos y cantidad de fragmentos. Úsala cuando el usuario pregunte qué documentos hay disponibles o cuántos están cargados.",
+    parameters: { type: "object", properties: {}, required: [] },
   },
   start_background_task: {
     type: "function",
@@ -479,7 +486,7 @@ function searchAvailable() {
 
 /** Tool definitions for the currently-enabled (and usable) tools. */
 function activeToolDefs() {
-  const defs = [TOOL_DEFS.knowledge_search, TOOL_DEFS.start_background_task, TOOL_DEFS.get_task_status, TOOL_DEFS.cancel_background_task];
+  const defs = [TOOL_DEFS.knowledge_search, TOOL_DEFS.knowledge_list_documents, TOOL_DEFS.start_background_task, TOOL_DEFS.get_task_status, TOOL_DEFS.cancel_background_task];
   if (toolsEnabled.web_search && searchAvailable()) defs.push(TOOL_DEFS.web_search);
   return defs;
 }
@@ -1211,10 +1218,20 @@ function renderKnowledgeDocuments() {
 
 async function refreshKnowledgeDocuments() {
   const res = await fetch("api/rag/documents");
-  if (!res.ok) return;
+  if (!res.ok) throw new Error(`No se pudo consultar el inventario (${res.status})`);
   const data = await res.json();
   knowledgeDocuments = Array.isArray(data.documents) ? data.documents : [];
   renderKnowledgeDocuments();
+  return knowledgeDocuments;
+}
+
+async function execKnowledgeDocuments() {
+  const documents = await refreshKnowledgeDocuments();
+  if (!documents.length) return "RESULTADO_DOCUMENTOS: no hay documentos cargados.";
+  return [
+    `RESULTADO_DOCUMENTOS: ${documents.length} documentos disponibles.`,
+    ...documents.slice(0, 20).map((doc) => `- ${doc.title || "Documento"}: ${Number(doc.chunks || 0)} fragmentos`),
+  ].join("\n");
 }
 
 function renderToolActivity() {
@@ -1250,6 +1267,7 @@ function renderToolActivity() {
 }
 
 function toolLabel(name) {
+  if (name === "knowledge_list_documents") return "Inventario documental";
   return ({ knowledge_search: "Consulta documental", web_search: "Búsqueda web", start_background_task: "Tarea en segundo plano", get_task_status: "Estado de tarea", cancel_background_task: "Cancelar tarea" })[name] || name;
 }
 
@@ -1330,6 +1348,7 @@ async function executeTool(name, argsJson) {
   if (name === "knowledge_search") {
     return { output: await execKnowledgeSearch(typeof args.query === "string" ? args.query : "") };
   }
+  if (name === "knowledge_list_documents") return { output: await execKnowledgeDocuments() };
   if (name === "start_background_task") {
     return { output: await createBackgroundTask(typeof args.goal === "string" ? args.goal : "") };
   }
@@ -1403,7 +1422,7 @@ async function fetchConfig() {
       const json = await res.json();
       serverSearchKey = !!json.search;
       renderKnowledgeStatus(json.rag);
-      void refreshKnowledgeDocuments();
+      void refreshKnowledgeDocuments().catch((error) => console.warn("[rag] inventory refresh failed", error));
       lbMode = !!json.lb;
       // Lock to LB mode only when the deploy reports a load balancer.
       allowDirect = json.allowDirect ?? !lbMode;

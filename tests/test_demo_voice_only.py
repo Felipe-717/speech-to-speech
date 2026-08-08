@@ -42,5 +42,6 @@ def test_front_hides_internal_gemma_text_and_disables_vad_interruptions():
 
     assert "function stripInternalModelText" in main
     assert "toolBatches" in main
+    assert "knowledge_list_documents" in main
     assert "const INTERRUPT_RESPONSE = false" in ws
     assert "const INTERRUPT_RESPONSE = false" in rtc
