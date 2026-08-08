@@ -16,6 +16,10 @@ Antes de pulsar Deploy:
 
 Sin Volume Disk, detener o reiniciar el Pod borra repositorio, entorno y cachés. Para una prueba única se puede continuar sin volumen, pero no se debe detener el Pod entre pasos.
 
+Importante: en un Pod sin volumen, no usar `Edit Pod` para añadir puertos después
+del despliegue. Declara `7860/http` al crear el Pod; si falta, crea un Pod nuevo
+con ese puerto desde el principio.
+
 ## 1. Entrar por SSH
 
 En RunPod: Pods → Pod → Connect → SSH. Copiar el comando que muestra el panel y ejecutarlo desde PowerShell local:
