@@ -1032,11 +1032,23 @@ async function cambiarModo(nuevo, armar = true) {
 
 // --- eventos ----------------------------------------------------------------
 
-ui.hablar.onmousedown = () => { if (modo === 'online') empezarLlamada(); else empezarAHablar(); };
-ui.hablar.onmouseup = () => { if (modo !== 'online') dejarDeHablar(); };
-ui.hablar.onmouseleave = () => { if (modo !== 'online') dejarDeHablar(); };
-ui.hablar.ontouchstart = (e) => { e.preventDefault(); modo === 'online' ? empezarLlamada() : empezarAHablar(); };
-ui.hablar.ontouchend = (e) => { e.preventDefault(); if (modo !== 'online') dejarDeHablar(); };
+  // Pointer events unify mouse, touch and pen. They also preserve the browser's
+  // user-activation gesture through the microphone permission + AudioContext
+  // startup path; separate mousedown/touchstart handlers were unreliable behind
+  // a proxy and could leave the button visually active with no WebSocket.
+  ui.hablar.onpointerdown = (e) => {
+    e.preventDefault();
+    ui.hablar.setPointerCapture?.(e.pointerId);
+    modo === 'online' ? empezarLlamada() : empezarAHablar();
+  };
+  ui.hablar.onpointerup = (e) => {
+    e.preventDefault();
+    if (modo !== 'online') dejarDeHablar();
+  };
+  ui.hablar.onpointercancel = (e) => {
+    e.preventDefault();
+    if (modo !== 'online') dejarDeHablar();
+  };
 ui.colgar.onclick = terminarLlamada;
 ui.silencio.onclick = () => { silenciado = !silenciado; pintarControles(); };
 
